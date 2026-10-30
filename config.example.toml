@@ -1,0 +1,20 @@
+# Archivo de ejemplo de configuración para Playlist Sync
+# Copia este archivo a config.toml si deseas personalizar valores locales.
+
+[server]
+host = "127.0.0.1"
+port = 8000
+log_level = "INFO"
+log_file = "playlist_sync.log"
+
+[storage]
+music_root = "music_root"
+database_path = "playlist_sync.sqlite3"
+min_disk_free_mb = 1024
+
+[sync]
+interval_hours = 6
+max_retries = 3
+safety_threshold = 0.50
+concurrency = 1
+

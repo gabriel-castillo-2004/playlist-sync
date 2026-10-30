@@ -1,0 +1,27 @@
+# Configuración general de Playlist Sync
+
+[server]
+host = "127.0.0.1"
+port = 8000
+log_level = "INFO"
+log_file = "playlist_sync.log"
+
+[storage]
+# Ruta donde se organizarán las carpetas y archivos MP3
+music_root = "music_root"
+# Ruta de la base de datos SQLite local
+database_path = "playlist_sync.sqlite3"
+# Espacio libre mínimo requerido en disco (en Megabytes) antes de descargar
+min_disk_free_mb = 1024
+
+[sync]
+# Intervalo de revisión automática en horas (0 = desactivado)
+interval_hours = 6
+# Límite de reintentos automáticos por elemento fallido
+max_retries = 3
+# Umbral de seguridad (RF-12): si la playlist remota disminuye a menos de este porcentaje
+# relativo a lo conocido previamente (0.50 = 50%), la sincronización se aborta por seguridad
+safety_threshold = 0.50
+# Descargas simultáneas (1 para no saturar PCs modestas)
+concurrency = 1
+

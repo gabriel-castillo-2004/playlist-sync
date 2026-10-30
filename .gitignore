@@ -1,15 +1,31 @@
-﻿# Entornos virtuales de Python
+# Python
 .venv/
 venv/
 __pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+dist/
+build/
 
-# Base de datos local
+# Testing & Quality
+.pytest_cache/
+.coverage
+htmlcov/
+.ruff_cache/
+.mypy_cache/
+
+# Databases
 *.sqlite3
+*.sqlite3-journal
 *.db
+*.db-journal
 
-# Carpeta de destino de la música
+# Music destination folder and logs
 music_root/
-
-# Archivos de la PC local y logs
-config.toml
 *.log
+logs/
+
+# Local overrides (optional)
+config.local.toml
+
