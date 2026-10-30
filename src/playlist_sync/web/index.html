@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0">
+  <meta name="theme-color" content="#2563eb">
+  <meta name="description" content="Descarga y sincronización de música y podcasts para tu celular">
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="icon" href="/icons/icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="/icons/icon-192.png">
+  <link rel="stylesheet" href="/styles.css">
+  <title>Mi Música</title>
+</head>
+<body>
+  <div class="app-layout">
+    <!-- Top Header -->
+    <header class="app-header">
+      <div class="header-branding">
+        <svg class="header-logo" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M9 18V5l12-2v13" />
+          <circle cx="6" cy="18" r="3" />
+          <circle cx="18" cy="16" r="3" />
+        </svg>
+        <div>
+          <h1 class="header-title">Mi Música</h1>
+          <p class="header-subtitle">Listas y canciones para tu celular</p>
+        </div>
+      </div>
+      <div class="header-actions">
+        <button id="btn-sync-all" class="btn btn-primary btn-large" type="button" aria-label="Actualizar todas las listas">
+          <svg class="btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="23 4 23 10 17 10" />
+            <polyline points="1 20 1 14 7 14" />
+            <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" />
+          </svg>
+          <span>Actualizar todo</span>
+        </button>
+      </div>
+    </header>
+
+    <!-- Global Sync Banner (Active Job) -->
+    <section id="sync-banner" class="sync-banner hidden" aria-live="polite">
+      <div class="sync-banner-content">
+        <div class="spinner"></div>
+        <div class="sync-banner-text">
+          <span id="sync-banner-title" class="sync-banner-title">Descargando música...</span>
+          <span id="sync-banner-detail" class="sync-banner-detail">Preparando archivos</span>
+        </div>
+      </div>
+      <div class="progress-bar-container">
+        <div id="sync-banner-progress" class="progress-bar-fill" style="width: 0%;"></div>
+      </div>
+    </section>
+
+    <!-- Add Source Section -->
+    <section class="add-section card">
+      <form id="add-source-form" class="add-form" novalidate>
+        <label for="source-url-input" class="form-label">Agregar una lista o programa</label>
+        <div class="input-group">
+          <input
+            type="text"
+            id="source-url-input"
+            class="form-input"
+            placeholder="Pega un link o escribe el nombre de un podcast"
+            autocomplete="off"
+            spellcheck="false"
+            required
+          />
+          <button id="btn-add-source" class="btn btn-secondary" type="submit">
+            <span>Guardar</span>
+          </button>
+        </div>
+      </form>
+      <div id="add-error-box" class="alert alert-error hidden" role="alert">
+        <div class="alert-content">
+          <span id="add-error-message"></span>
+        </div>
+        <button id="btn-close-error" class="alert-close" type="button" aria-label="Cerrar aviso">&times;</button>
+      </div>
+    </section>
+
+    <!-- System Status & Connection Bar -->
+    <section class="system-bar">
+      <div id="system-health-pill" class="health-pill" role="status">
+        <span class="health-dot health-ok"></span>
+        <span id="health-label">Verificando sistema...</span>
+      </div>
+      <div id="connection-pill" class="connection-pill">
+        <span class="connection-dot live"></span>
+        <span id="connection-label">En vivo</span>
+      </div>
+    </section>
+
+    <!-- Sources Grid / List -->
+    <main>
+      <section id="sources-container" class="sources-list" aria-label="Tus listas de música">
+        <!-- Rendered dynamically by app.js -->
+        <div class="empty-state card">
+          <svg class="empty-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+            <path d="M9 18V5l12-2v13" />
+            <circle cx="6" cy="18" r="3" />
+            <circle cx="18" cy="16" r="3" />
+          </svg>
+          <h2>Cargando tus listas...</h2>
+          <p>Un momento por favor.</p>
+        </div>
+      </section>
+    </main>
+
+    <!-- Health Modal (Diagnostic Details) -->
+    <dialog id="health-modal" class="modal">
+      <div class="modal-box card">
+        <div class="modal-header">
+          <h2>Estado del Sistema</h2>
+          <button id="btn-close-modal" class="btn-icon-close" type="button" aria-label="Cerrar">&times;</button>
+        </div>
+        <div id="health-checks-list" class="checks-list">
+          <!-- Rendered dynamically -->
+        </div>
+        <div class="modal-footer">
+          <button id="btn-modal-dismiss" class="btn btn-secondary" type="button">Entendido</button>
+        </div>
+      </div>
+    </dialog>
+
+    <!-- Toast Notifications -->
+    <div id="toast-container" class="toast-container" aria-live="polite"></div>
+  </div>
+
+  <script src="/app.js" defer></script>
+</body>
+</html>

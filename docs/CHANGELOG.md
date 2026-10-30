@@ -5,6 +5,17 @@ Todas las modificaciones notables del proyecto se documentarán en este archivo.
 El formato se basa en [Keep a Changelog](https://keepachangelog.com/es-ES/1.0.0/).
 
 ## [Unreleased]
+### Fase 4 - Interfaz web "a prueba de mamá"
+- Adaptador web (`adapters/web.py`) para servir la aplicación estática en `/` y endpoints de carátulas (`/covers/{id}`).
+- Pantalla única responsive (`web/index.html`) utilizable con una sola mano en pantallas móviles (desde 360 px).
+- Estilos CSS puros (`web/styles.css`, `web/style.css`) con variables personalizadas, botones táctiles y soporte automático para modo oscuro (`prefers-color-scheme`).
+- Lógica en Vanilla JavaScript (`web/app.js`, RNF-5) sin dependencias ni paso de compilación.
+- Conexión reactiva en tiempo real vía Server-Sent Events (`EventSource('/events')`, RF-10) con reconexión y polling de contingencia cada 5s si el stream se interrumpe.
+- Tarjetas de fuentes con estados en español claro ("Al día ✓", "X nuevas — Descargar", "Descargando...", "Hubo un problema").
+- Soporte PWA con manifiesto web (`web/manifest.webmanifest`) e iconos vectoriales y PNG (`web/icons/`).
+- Documento de comprobaciones manuales en `docs/manual-checks.md`.
+- Pruebas automatizadas de integración web (`tests/integration/test_web.py`).
+
 ### Fase 3 - API y trabajos en segundo plano
 - Servidor HTTP con FastAPI y middleware CORS (`api/app.py`).
 - Endpoints REST para gestión de fuentes (`/sources`, `/sources/{id}`, `/sources/{id}/sync`), sincronización global (`/sync-all`), reintento de descargas fallidas (`/items/{id}/retry`) y diagnóstico de salud del sistema (`/health`).

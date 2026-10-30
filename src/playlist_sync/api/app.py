@@ -11,6 +11,7 @@ from fastapi.responses import JSONResponse
 
 from playlist_sync.adapters.library import LocalLibrary
 from playlist_sync.adapters.repo import SQLiteRepo
+from playlist_sync.adapters.web import mount_web_adapter
 from playlist_sync.adapters.ytdlp_source import YtDlpSource
 from playlist_sync.api.routers import health, sources, sse, sync
 from playlist_sync.api.schemas import ErrorResponse
@@ -101,5 +102,8 @@ def create_app(
     app.include_router(sync.router)
     app.include_router(sse.router)
     app.include_router(health.router)
+
+    # Mount web frontend adapter and cover endpoints
+    mount_web_adapter(app, music_root=resolved_music_root)
 
     return app

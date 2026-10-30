@@ -99,6 +99,19 @@ Este documento registra las decisiones técnicas tomadas a lo largo del proyecto
 - **Motivo:** Garantizar estabilidad de procesos de descarga, trazabilidad en vivo para la interfaz web y prevenir saturación de red, CPU y disco.
 - **Alternativas descartadas:** WebSockets bidireccionales complejos o polling recurrente en la API.
 
+---
+
+## ADR-009: Frontend Vanilla "A prueba de mamá", SSE y Contingencia por Polling (RNF-5, RF-10)
+- **Fecha:** 2026-10-30
+- **Decisión:** 
+  - Frontend construido en Vanilla HTML5, CSS3 y JavaScript moderno sin frameworks (React, Vue), sin Node.js y sin paso de compilación (RNF-5).
+  - Servido directamente como archivos estáticos en `/` por FastAPI mediante `adapters/web.py`.
+  - Conexión reactiva en tiempo real mediante `EventSource('/events')` (RF-10) con reconexión automática y mecanismo de contingencia por polling cada 5 segundos si el stream SSE se interrumpe.
+  - Diseño adaptable centrado en pantallas móviles (mínimo 360 px), soporte PWA (`manifest.webmanifest`), modo oscuro automático (`prefers-color-scheme`) y ausencia total de jerga técnica.
+- **Motivo:** Máxima simplicidad de mantenimiento, longevidad del código, ejecución ligera en equipos de bajos recursos y usabilidad intuitiva para cualquier usuario.
+- **Alternativas descartadas:** Single Page Apps con frameworks pesados (React, Vite, Tailwind con Node.js build step).
+
+
 
 
 
