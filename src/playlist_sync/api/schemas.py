@@ -66,3 +66,12 @@ class HealthResponse(BaseModel):
     status: str
     all_passed: bool
     checks: list[dict[str, Any]]
+
+
+class PodcastSearchItemResponse(BaseModel):
+    title: str
+    artist: str
+    feed_url: str
+    cover_url: str | None = None
+    track_count: int | None = None
+    genre: str | None = None

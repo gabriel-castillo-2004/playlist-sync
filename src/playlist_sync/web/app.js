@@ -27,6 +27,9 @@
     addErrorBox: document.getElementById('add-error-box'),
     addErrorMessage: document.getElementById('add-error-message'),
     btnCloseError: document.getElementById('btn-close-error'),
+    podcastSearchBox: document.getElementById('podcast-search-results'),
+    podcastResultsList: document.getElementById('podcast-results-list'),
+    btnCloseSearch: document.getElementById('btn-close-search'),
     syncBanner: document.getElementById('sync-banner'),
     syncBannerTitle: document.getElementById('sync-banner-title'),
     syncBannerDetail: document.getElementById('sync-banner-detail'),
@@ -390,30 +393,111 @@
   async function handleAddSource(event) {
     event.preventDefault();
     hideAddError();
+    hidePodcastSearch();
 
-    const url = elements.sourceInput.value.trim();
-    if (!url) return;
+    const inputVal = elements.sourceInput.value.trim();
+    if (!inputVal) return;
 
     elements.btnAddSource.disabled = true;
-    elements.btnAddSource.innerHTML = '<span>Guardando...</span>';
 
-    try {
-      const newSource = await apiRequest('/sources', {
-        method: 'POST',
-        body: JSON.stringify({ url }),
+    // Check if input is a direct URL or a search query
+    const isDirectUrl = inputVal.startsWith('http://') || inputVal.startsWith('https://');
+
+    if (isDirectUrl) {
+      elements.btnAddSource.innerHTML = '<span>Guardando...</span>';
+      try {
+        const newSource = await apiRequest('/sources', {
+          method: 'POST',
+          body: JSON.stringify({ url: inputVal }),
+        });
+
+        elements.sourceInput.value = '';
+        showToast(`¡"${newSource.title}" guardada!`);
+        await loadSources(false);
+
+        // Offer immediate sync
+        handleSyncSource(newSource.id);
+      } catch (err) {
+        showAddError(err.message || 'No se pudo agregar la lista.');
+      } finally {
+        elements.btnAddSource.disabled = false;
+        elements.btnAddSource.innerHTML = '<span>Guardar</span>';
+      }
+    } else {
+      // Search podcast by name via iTunes API
+      elements.btnAddSource.innerHTML = '<span>Buscando...</span>';
+      try {
+        const results = await apiRequest(`/podcasts/search?q=${encodeURIComponent(inputVal)}`);
+        if (!results || results.length === 0) {
+          showAddError(`No se encontró ningún podcast con el nombre "${inputVal}".`);
+        } else {
+          showPodcastSearchResults(results);
+        }
+      } catch (err) {
+        showAddError(err.message || 'No se pudo buscar podcasts.');
+      } finally {
+        elements.btnAddSource.disabled = false;
+        elements.btnAddSource.innerHTML = '<span>Guardar</span>';
+      }
+    }
+  }
+
+  function showPodcastSearchResults(results) {
+    if (!elements.podcastSearchBox || !elements.podcastResultsList) return;
+
+    elements.podcastResultsList.innerHTML = results.map((item) => `
+      <div class="podcast-result-item">
+        <img
+          src="${escapeHtml(item.cover_url || '/icons/icon.svg')}"
+          class="podcast-result-cover"
+          alt="Portada"
+          onerror="this.src='/icons/icon.svg'"
+        />
+        <div class="podcast-result-info">
+          <div class="podcast-result-title">${escapeHtml(item.title)}</div>
+          <div class="podcast-result-meta">${escapeHtml(item.artist)}${item.track_count ? ' · ' + item.track_count + ' episodios' : ''}</div>
+        </div>
+        <button
+          class="btn btn-secondary btn-sm btn-select-podcast"
+          data-feed-url="${escapeHtml(item.feed_url)}"
+          data-title="${escapeHtml(item.title)}"
+        >
+          Agregar
+        </button>
+      </div>
+    `).join('');
+
+    elements.podcastSearchBox.classList.remove('hidden');
+
+    elements.podcastResultsList.querySelectorAll('.btn-select-podcast').forEach((btn) => {
+      btn.addEventListener('click', async () => {
+        const feedUrl = btn.dataset.feedUrl;
+        const title = btn.dataset.title;
+        btn.disabled = true;
+        btn.textContent = 'Guardando...';
+
+        try {
+          const newSource = await apiRequest('/sources', {
+            method: 'POST',
+            body: JSON.stringify({ url: feedUrl }),
+          });
+          hidePodcastSearch();
+          elements.sourceInput.value = '';
+          showToast(`¡"${title}" guardado!`);
+          await loadSources(false);
+          handleSyncSource(newSource.id);
+        } catch (err) {
+          showAddError(err.message || 'No se pudo agregar este podcast.');
+          btn.disabled = false;
+          btn.textContent = 'Agregar';
+        }
       });
+    });
+  }
 
-      elements.sourceInput.value = '';
-      showToast(`¡"${newSource.title}" guardada!`);
-      await loadSources(false);
-
-      // Offer immediate sync
-      handleSyncSource(newSource.id);
-    } catch (err) {
-      showAddError(err.message || 'No se pudo agregar la lista.');
-    } finally {
-      elements.btnAddSource.disabled = false;
-      elements.btnAddSource.innerHTML = '<span>Guardar</span>';
+  function hidePodcastSearch() {
+    if (elements.podcastSearchBox) {
+      elements.podcastSearchBox.classList.add('hidden');
     }
   }
 
@@ -546,6 +630,7 @@
     // Event Listeners
     elements.addForm.addEventListener('submit', handleAddSource);
     elements.btnCloseError.addEventListener('click', hideAddError);
+    elements.btnCloseSearch.addEventListener('click', hidePodcastSearch);
     elements.btnSyncAll.addEventListener('click', handleSyncAll);
 
     elements.healthPill.addEventListener('click', () => {
@@ -575,3 +660,4 @@
     init();
   }
 })();
+

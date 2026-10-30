@@ -9,11 +9,11 @@ from fastapi import FastAPI, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
+from playlist_sync.adapters.composite_source import CompositeSource
 from playlist_sync.adapters.library import LocalLibrary
 from playlist_sync.adapters.repo import SQLiteRepo
 from playlist_sync.adapters.web import mount_web_adapter
-from playlist_sync.adapters.ytdlp_source import YtDlpSource
-from playlist_sync.api.routers import health, sources, sse, sync
+from playlist_sync.api.routers import health, podcasts, sources, sse, sync
 from playlist_sync.api.schemas import ErrorResponse
 from playlist_sync.core.errors import AppError, ErrorCode
 from playlist_sync.core.models import Library, Source
@@ -56,7 +56,7 @@ def create_app(
 
     resolved_music_root = Path(music_root).resolve()
     resolved_repo = repo or SQLiteRepo("playlist_sync.sqlite3")
-    resolved_source = source_adapter or YtDlpSource()
+    resolved_source = source_adapter or CompositeSource()
     resolved_library = library or LocalLibrary(resolved_music_root)
     resolved_broadcaster = broadcaster or SSEBroadcaster()
 
@@ -102,6 +102,7 @@ def create_app(
     app.include_router(sync.router)
     app.include_router(sse.router)
     app.include_router(health.router)
+    app.include_router(podcasts.router)
 
     # Mount web frontend adapter and cover endpoints
     mount_web_adapter(app, music_root=resolved_music_root)

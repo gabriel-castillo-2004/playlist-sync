@@ -111,6 +111,20 @@ Este documento registra las decisiones técnicas tomadas a lo largo del proyecto
 - **Motivo:** Máxima simplicidad de mantenimiento, longevidad del código, ejecución ligera en equipos de bajos recursos y usabilidad intuitiva para cualquier usuario.
 - **Alternativas descartadas:** Single Page Apps con frameworks pesados (React, Vite, Tailwind con Node.js build step).
 
+---
+
+## ADR-010: Soporte Integral de Podcasts (RSS directo, YouTube Podcasts y Búsqueda iTunes) (RF-13, RF-14)
+- **Fecha:** 2026-10-30
+- **Decisión:** 
+  - Descarga directa de episodios de podcasts RSS mediante `adapters/rss_source.py` sin utilizar yt-dlp, leyendo streams de audio enclosures con barra de progreso y escritura segura.
+  - Búsqueda pública de podcasts por nombre o tema mediante la API de iTunes Search (`adapters/itunes_search.py`), sin requerir claves de API.
+  - Soporte de podcasts en YouTube (`kind=yt_podcast`) clasificando listas identificadas con `/podcast/` o títulos de podcast.
+  - Generación de playlists `.m3u8` para podcasts ordenadas cronológicamente de más nuevo a más viejo (más reciente primero), y asignación automática del género ID3 "Podcast".
+  - Adaptador unificado `CompositeSource` que enruta transparentemente peticiones entre YouTube, RSS directo y búsqueda de podcasts.
+- **Motivo:** Brindar soporte completo a programas de audio sin sobrecargar el motor yt-dlp para feeds estándar y garantizar compatibilidad con reproductores móviles.
+- **Alternativas descartadas:** Depender de yt-dlp para parsear feeds RSS de podcasts.
+
+
 
 
 

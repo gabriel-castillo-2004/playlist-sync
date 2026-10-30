@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0" xmlns:media="http://search.yahoo.com/mrss/" xmlns:itunes="http://www.itunes.com/dtds/podcast-1.0.dtd">
+  <channel>
+    <title>Podcast Complejo &amp; Raro</title>
+    <link>https://example.com/weird</link>
+    <description>Casos de prueba con enlaces complejos.</description>
+    <itunes:image href="https://example.com/art.png?v=123&amp;size=large" />
+    <item>
+      <title>Caso 1: Audio con parámetros de token</title>
+      <guid>weird-1</guid>
+      <pubDate>Tue, 28 Oct 2026 12:00:00 +0000</pubDate>
+      <enclosure url="https://cdn.example.com/stream.mp3?token=xyz123&amp;expire=9999" type="audio/mp3" />
+    </item>
+    <item>
+      <title>Caso 2: Fallback media content sin enclosure directo</title>
+      <guid>weird-2</guid>
+      <pubDate>Wed, 29 Oct 2026 15:00:00 +0000</pubDate>
+      <media:content url="https://cdn.example.com/media_fallback.mp3" type="audio/mpeg" fileSize="5000000" />
+    </item>
+  </channel>
+</rss>

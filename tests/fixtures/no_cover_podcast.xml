@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+  <channel>
+    <title>Podcast Sin Portada</title>
+    <link>https://example.com/no-cover</link>
+    <description>Podcast minimalista sin imágenes.</description>
+    <item>
+      <title>Episodio Único: Grabación rápida</title>
+      <guid>nocover-ep1</guid>
+      <pubDate>Mon, 20 Oct 2026 14:30:00 GMT</pubDate>
+      <enclosure url="https://example.com/audio/nocover.mp3" type="audio/mpeg" />
+    </item>
+  </channel>
+</rss>

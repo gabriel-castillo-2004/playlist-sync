@@ -8,10 +8,10 @@ import tomllib
 from pathlib import Path
 from typing import Any
 
+from playlist_sync.adapters.composite_source import CompositeSource
 from playlist_sync.adapters.repo import SQLiteRepo
-from playlist_sync.adapters.ytdlp_source import YtDlpSource
 from playlist_sync.core.errors import AppError
-from playlist_sync.core.models import Progress
+from playlist_sync.core.models import Progress, Source
 from playlist_sync.doctor import run_doctor
 from playlist_sync.services.sync import add_source_service, sync_source_service
 
@@ -50,7 +50,7 @@ def cli_progress_hook(progress: Progress) -> None:
     )
 
 
-def cmd_add(url: str, repo: SQLiteRepo, source_adapter: YtDlpSource) -> int:
+def cmd_add(url: str, repo: SQLiteRepo, source_adapter: Source) -> int:
     """Handle 'add <url>' command."""
     print(f"Inspeccionando enlace: {url}...")
     try:
@@ -70,7 +70,7 @@ def cmd_add(url: str, repo: SQLiteRepo, source_adapter: YtDlpSource) -> int:
 def cmd_sync(
     source_target: str,
     repo: SQLiteRepo,
-    source_adapter: YtDlpSource,
+    source_adapter: Source,
     music_root: Path,
     safety_threshold: float,
     max_retries: int,
@@ -224,7 +224,7 @@ def main() -> None:
     max_retries = int(str(sync_cfg.get("max_retries", 3)))
 
     repo = SQLiteRepo(db_path)
-    source_adapter = YtDlpSource()
+    source_adapter = CompositeSource()
 
     if args.subcommand == "add":
         code = cmd_add(args.url, repo, source_adapter)

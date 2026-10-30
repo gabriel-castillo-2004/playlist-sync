@@ -5,6 +5,16 @@ Todas las modificaciones notables del proyecto se documentarán en este archivo.
 El formato se basa en [Keep a Changelog](https://keepachangelog.com/es-ES/1.0.0/).
 
 ## [Unreleased]
+### Fase 5 - Podcasts (RSS, YouTube Podcasts y Búsqueda iTunes)
+- Adaptador de podcasts RSS (`adapters/rss_source.py`) con parsing directo de XML sin yt-dlp y descarga streaming de enclosures de audio con progreso en vivo (RF-13).
+- Adaptador de búsqueda de podcasts (`adapters/itunes_search.py`) consumiendo la API pública de Apple iTunes sin API key.
+- Adaptador unificado `CompositeSource` (`adapters/composite_source.py`) para enrutar transparentemente URLs de YouTube, feeds RSS y búsquedas por nombre.
+- Detección de Podcasts en YouTube (`SourceKind.YT_PODCAST`, RF-14).
+- Orden cronológico más nuevo primero en archivos `.m3u8` y asignación de género "Podcast" en metadatos ID3.
+- Endpoint de búsqueda de podcasts `GET /podcasts/search` (`api/routers/podcasts.py`).
+- Interfaz web actualizada para buscar podcasts por nombre o link directo con selección interactiva.
+- Fixtures de prueba XML (`valid_podcast.xml`, `no_cover_podcast.xml`, `weird_enclosure_podcast.xml`) y pruebas unitarias/integración (`test_itunes_search.py`, `test_rss_source.py`, `test_podcasts.py`).
+
 ### Fase 4 - Interfaz web "a prueba de mamá"
 - Adaptador web (`adapters/web.py`) para servir la aplicación estática en `/` y endpoints de carátulas (`/covers/{id}`).
 - Pantalla única responsive (`web/index.html`) utilizable con una sola mano en pantallas móviles (desde 360 px).

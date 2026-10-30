@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0" xmlns:itunes="http://www.itunes.com/dtds/podcast-1.0.dtd">
+  <channel>
+    <title>Charlas de Tecnología</title>
+    <link>https://example.com/podcast</link>
+    <description>Un podcast sobre ciencia, código y tecnología.</description>
+    <language>es</language>
+    <itunes:author>María Ingeniera</itunes:author>
+    <itunes:image href="https://example.com/podcast/cover.jpg" />
+    <image>
+      <url>https://example.com/podcast/cover.jpg</url>
+      <title>Charlas de Tecnología</title>
+      <link>https://example.com/podcast</link>
+    </image>
+    <item>
+      <title>Episodio 2: Agentes y Modelos de Lenguaje</title>
+      <guid isPermaLink="false">ep-002-agentes</guid>
+      <pubDate>Fri, 24 Oct 2026 10:00:00 +0000</pubDate>
+      <enclosure url="https://example.com/audio/ep2.mp3" length="10485760" type="audio/mpeg" />
+      <itunes:duration>1800</itunes:duration>
+    </item>
+    <item>
+      <title>Episodio 1: Bienvenidos al podcast</title>
+      <guid isPermaLink="false">ep-001-bienvenida</guid>
+      <pubDate>Fri, 17 Oct 2026 10:00:00 +0000</pubDate>
+      <enclosure url="https://example.com/audio/ep1.mp3" length="8388608" type="audio/mpeg" />
+      <itunes:duration>1200</itunes:duration>
+    </item>
+  </channel>
+</rss>

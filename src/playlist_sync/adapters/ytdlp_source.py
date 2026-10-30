@@ -115,9 +115,17 @@ class YtDlpSource:
         entries = info.get("entries")
         item_count = len(list(entries)) if entries is not None else None
 
+        # Detect YouTube podcasts (RF-14)
+        is_podcast = (
+            "/podcast" in url.lower()
+            or "podcast" in title.lower()
+            or info.get("channel_type") == "podcast"
+        )
+        kind = SourceKind.YT_PODCAST if is_podcast else SourceKind.YT_PLAYLIST
+
         return SourceInfo(
             url=url,
-            kind=SourceKind.YT_PLAYLIST,
+            kind=kind,
             title=title,
             cover_url=cover_url,
             item_count=item_count,
