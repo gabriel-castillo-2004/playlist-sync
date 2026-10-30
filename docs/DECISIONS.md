@@ -74,4 +74,17 @@ Este documento registra las decisiones técnicas tomadas a lo largo del proyecto
 - **Motivo:** Protección estricta contra pérdida de archivos o fallos temporales en las APIs de YouTube.
 - **Alternativas descartadas:** Borrado sincronizado de canciones locales.
 
+---
+
+## ADR-007: Formato de metadatos ID3v2.3 y listas de reproducción .m3u8
+- **Fecha:** 2026-10-30
+- **Decisión:** 
+  - Uso de ID3v2.3 mediante `mutagen` para el etiquetado de canciones (título, artista, álbum, número de pista `n/total`, año, género y portada embebida tipo Front Cover).
+  - Listas de reproducción `.m3u8` generadas con codificación UTF-8 sin BOM y rutas estrictamente relativas (solo nombre del archivo en la misma carpeta).
+  - Al reordenar canciones, se actualiza únicamente la etiqueta `TRCK` y el archivo `.m3u8`, manteniendo invariables los nombres de los archivos en disco para no disparar re-transferencias innecesarias en Syncthing.
+  - Ninguna parte del sistema elimina archivos de audio descargados (comprobado mediante pruebas de arquitectura).
+- **Motivo:** Máxima compatibilidad con reproductores de Android/iOS/PC y eficiencia en la sincronización continua mediante Syncthing.
+- **Alternativas descartadas:** Rutas absolutas en archivos m3u8 o renombrar archivos según su posición en la playlist.
+
+
 

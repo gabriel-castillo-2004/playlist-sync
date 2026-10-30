@@ -7,10 +7,12 @@ import shutil
 from collections.abc import Callable
 from pathlib import Path
 
+from playlist_sync.adapters.library import LocalLibrary
 from playlist_sync.adapters.repo import SQLiteRepo
 from playlist_sync.core.errors import AppError, ErrorCode, classify_ytdlp_error
 from playlist_sync.core.models import (
     ItemStatus,
+    Library,
     Progress,
     RemoteItem,
     Source,
@@ -65,6 +67,7 @@ def sync_source_service(
     source_adapter: Source,
     source_id: int,
     music_root: Path,
+    library: Library | None = None,
     on_progress: Callable[[Progress], None] | None = None,
     min_free_mb: int = 1024,
     safety_threshold: float = 0.50,
@@ -78,6 +81,7 @@ def sync_source_service(
             technical_detail=f"Source ID {source_id} does not exist in local database.",
         )
 
+    lib = library or LocalLibrary(music_root)
     dest_dir = music_root / source.folder_name
     check_disk_space_available(dest_dir, min_mb=min_free_mb)
 
@@ -114,9 +118,11 @@ def sync_source_service(
     existing_items = {it.external_id: it for it in repo.get_items_by_source(source_id)}
     plan = calculate_sync_plan(existing_items, remote_items, max_retries=max_retries)
 
-    # 1. Update position changes
+    # 1. Update position changes without renaming files
     for item_rec, new_pos in plan.items_to_update_position:
         repo.update_item_position(item_rec.id, new_pos)
+        if item_rec.file_path and hasattr(lib, "update_track_position_tag"):
+            lib.update_track_position_tag(Path(item_rec.file_path), new_pos, len(remote_items))
 
     # 2. Mark removed remote items without deleting files (RF-12)
     for removed_rec in plan.items_to_mark_removed:
@@ -143,10 +149,16 @@ def sync_source_service(
                 dest_dir=dest_dir,
                 on_progress=on_progress,
             )
+            final_path = lib.finalize_item(
+                source=source,
+                item=db_item,
+                file=downloaded,
+                total_items=len(remote_items),
+            )
             repo.update_item_status(
                 item_id=db_item.id,
                 status=ItemStatus.DOWNLOADED,
-                file_path=str(downloaded.file_path),
+                file_path=str(final_path),
                 increment_attempts=True,
             )
             downloaded_count += 1
@@ -161,6 +173,13 @@ def sync_source_service(
             )
             failed_count += 1
             failed_items.append((remote_item.external_id, app_err.user_message))
+
+    # 4. Regenerate .m3u8 playlist file (Section 6.2)
+    all_source_items = repo.get_items_by_source(source_id)
+    try:
+        lib.rebuild_playlist_file(source=source, items=all_source_items)
+    except Exception as exc:
+        logger.warning("Could not rebuild playlist file for source %s: %s", source_id, exc)
 
     # Conclude source sync status
     final_status = SourceStatus.IDLE if failed_count == 0 else SourceStatus.ERROR

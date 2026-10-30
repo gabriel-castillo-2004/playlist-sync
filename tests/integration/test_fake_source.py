@@ -64,7 +64,7 @@ class FakeSource:
 
         dest_dir.mkdir(parents=True, exist_ok=True)
         fake_file = dest_dir / f"{item.title} [{item.external_id}].mp3"
-        fake_file.write_text("ID3_FAKE_AUDIO_DATA", encoding="utf-8")
+        fake_file.write_bytes(b"\xff\xfb\x90d" + b"\x00" * 200)
 
         if on_progress:
             on_progress(

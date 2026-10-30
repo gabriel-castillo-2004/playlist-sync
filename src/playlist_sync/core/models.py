@@ -156,3 +156,25 @@ class Source(Protocol):
     ) -> DownloadedFile:
         """Download an item to dest_dir as MP3."""
         ...
+
+
+class Library(Protocol):
+    """Local library writer and organizer contract (Section 5.2)."""
+
+    def finalize_item(
+        self,
+        source: SourceRecord,
+        item: ItemRecord,
+        file: DownloadedFile,
+        total_items: int = 1,
+    ) -> Path:
+        """Tag MP3 with ID3 metadata and embedded cover art."""
+        ...
+
+    def rebuild_playlist_file(
+        self,
+        source: SourceRecord,
+        items: list[ItemRecord],
+    ) -> Path:
+        """Regenerate UTF-8 relative .m3u8 playlist file in the source directory."""
+        ...

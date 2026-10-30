@@ -5,6 +5,15 @@ Todas las modificaciones notables del proyecto se documentarán en este archivo.
 El formato se basa en [Keep a Changelog](https://keepachangelog.com/es-ES/1.0.0/).
 
 ## [Unreleased]
+### Fase 2 - Biblioteca (archivos, etiquetas y playlists)
+- Módulo de biblioteca local (`adapters/library.py`) y contrato `Library` (sección 5.2).
+- Etiquetado ID3v2.3 completo con `mutagen` (`TIT2`, `TPE1`, `TALB`, `TRCK`, `TCON`, `TDRC`, `APIC`).
+- Extracción inteligente de artista y título desde cadenas con separadores comunes.
+- Descarga y persistencia de carátula de álbum `cover.jpg` y carátula embebida en MP3.
+- Generador de listas `.m3u8` relativas con codificación UTF-8 sin BOM (RF-7, RNF-6).
+- Idempotencia en la regeneración de playlists y actualización de posición sin renombrar archivos en disco.
+- Prueba arquitectónica que valida la imposibilidad de borrado de archivos de audio (RF-12).
+
 ### Fase 1 - Núcleo de descarga (sin web)
 - Modelos de dominio (`core/models.py`) y reglas de sincronización incremental (`core/sync_rules.py`).
 - Catálogo y mapeo exhaustivo de errores de yt-dlp a mensajes en español (`core/errors.py`).
