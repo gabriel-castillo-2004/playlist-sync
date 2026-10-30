@@ -5,6 +5,15 @@ Todas las modificaciones notables del proyecto se documentarán en este archivo.
 El formato se basa en [Keep a Changelog](https://keepachangelog.com/es-ES/1.0.0/).
 
 ## [Unreleased]
+### Fase 3 - API y trabajos en segundo plano
+- Servidor HTTP con FastAPI y middleware CORS (`api/app.py`).
+- Endpoints REST para gestión de fuentes (`/sources`, `/sources/{id}`, `/sources/{id}/sync`), sincronización global (`/sync-all`), reintento de descargas fallidas (`/items/{id}/retry`) y diagnóstico de salud del sistema (`/health`).
+- Streaming en vivo de progreso de sincronización mediante Server-Sent Events en `/events` (`api/routers/sse.py`, `services/jobs.py`, RF-10).
+- Candado de exclusión mutua global mediante `asyncio.Lock` en `JobExecutor` para evitar descargas concurrentes retornando HTTP 409 Conflict (RF-11).
+- Rotación automática de logs (`logging_config.py`) con `RotatingFileHandler` a 5 MB y 3 respaldos (RNF-6).
+- Subcomando CLI `playlist-sync serve` para iniciar el servidor de desarrollo o producción con `uvicorn`.
+- Suite de pruebas de integración de API y SSE utilizando `FastAPI TestClient` y `FakeSource`.
+
 ### Fase 2 - Biblioteca (archivos, etiquetas y playlists)
 - Módulo de biblioteca local (`adapters/library.py`) y contrato `Library` (sección 5.2).
 - Etiquetado ID3v2.3 completo con `mutagen` (`TIT2`, `TPE1`, `TALB`, `TRCK`, `TCON`, `TDRC`, `APIC`).

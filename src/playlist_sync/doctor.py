@@ -50,8 +50,11 @@ class SystemDoctor:
                 text=True,
                 check=False,
                 shell=False,
+                timeout=5.0,
             )
             return res.returncode, (res.stdout + res.stderr).strip()
+        except subprocess.TimeoutExpired:
+            return 1, "Comando superó el tiempo límite (timeout)."
         except Exception as exc:
             return 1, str(exc)
 

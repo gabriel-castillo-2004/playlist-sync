@@ -86,5 +86,19 @@ Este documento registra las decisiones técnicas tomadas a lo largo del proyecto
 - **Motivo:** Máxima compatibilidad con reproductores de Android/iOS/PC y eficiencia en la sincronización continua mediante Syncthing.
 - **Alternativas descartadas:** Rutas absolutas en archivos m3u8 o renombrar archivos según su posición en la playlist.
 
+---
+
+## ADR-008: Servidor FastAPI, Server-Sent Events (SSE) y Candado de Concurrencia (RF-10, RF-11)
+- **Fecha:** 2026-10-30
+- **Decisión:** 
+  - Exposición de la API REST mediante FastAPI con endpoints delgados organizados en routers (`sources`, `sync`, `sse`, `health`).
+  - La lógica de negocio pesada (descargas y sincronizaciones) se delega a `JobExecutor` ejecutando tareas en segundo plano vía `asyncio.to_thread`.
+  - Candado de exclusión mutua global mediante `asyncio.Lock` (RF-11): solo se permite una sincronización activa a la vez. Intentos concurrentes devuelven `409 Conflict` con mensaje explicativo en español.
+  - Streaming de progreso en tiempo real mediante Server-Sent Events (SSE) en `/events` (RF-10) con patrón pub/sub en memoria (`SSEBroadcaster`).
+  - Rotación automática de logs con `RotatingFileHandler` (máximo 5 MB por archivo, 3 respaldos) (RNF-6).
+- **Motivo:** Garantizar estabilidad de procesos de descarga, trazabilidad en vivo para la interfaz web y prevenir saturación de red, CPU y disco.
+- **Alternativas descartadas:** WebSockets bidireccionales complejos o polling recurrente en la API.
+
+
 
 

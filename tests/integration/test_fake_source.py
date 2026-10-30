@@ -37,6 +37,8 @@ class FakeSource:
         self.download_calls: list[str] = []
 
     def inspect(self, url: str) -> SourceInfo:
+        if not (url.startswith("http://") or url.startswith("https://")):
+            raise AppError(ErrorCode.INVALID_URL, f"Invalid URL scheme: {url}")
         if self.is_private:
             raise AppError(ErrorCode.PRIVATE_SOURCE)
         return SourceInfo(

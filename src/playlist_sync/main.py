@@ -6,6 +6,7 @@ import argparse
 import sys
 import tomllib
 from pathlib import Path
+from typing import Any
 
 from playlist_sync.adapters.repo import SQLiteRepo
 from playlist_sync.adapters.ytdlp_source import YtDlpSource
@@ -195,6 +196,11 @@ def main() -> None:
     # Status
     subparsers.add_parser("status", help="Consultar estado de las fuentes registradas")
 
+    # Serve
+    parser_serve = subparsers.add_parser("serve", help="Iniciar servidor web local (FastAPI)")
+    parser_serve.add_argument("--host", default=None, help="Dirección host a enlazar")
+    parser_serve.add_argument("--port", type=int, default=None, help="Puerto a enlazar")
+
     args = parser.parse_args()
 
     if not args.subcommand:
@@ -237,6 +243,30 @@ def main() -> None:
     elif args.subcommand == "status":
         code = cmd_status(repo)
         sys.exit(code)
+    elif args.subcommand == "serve":
+        import uvicorn
+
+        from playlist_sync.api.app import create_app
+
+        raw_server = cfg.get("server")
+        server_cfg: dict[str, Any] = raw_server if isinstance(raw_server, dict) else {}
+        host = args.host or str(server_cfg.get("host", "127.0.0.1"))
+        port = args.port or int(str(server_cfg.get("port", 8000)))
+        log_file = str(server_cfg.get("log_file", "playlist_sync.log"))
+        log_level = str(server_cfg.get("log_level", "INFO"))
+
+        app = create_app(
+            repo=repo,
+            source_adapter=source_adapter,
+            music_root=music_root,
+            safety_threshold=safety_threshold,
+            max_retries=max_retries,
+            min_disk_free_mb=min_disk_free_mb,
+            log_file=log_file,
+            log_level=log_level,
+        )
+        print(f"Iniciando Playlist Sync en http://{host}:{port}")
+        uvicorn.run(app, host=host, port=port)
 
 
 if __name__ == "__main__":
