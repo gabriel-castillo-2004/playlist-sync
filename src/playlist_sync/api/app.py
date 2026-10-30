@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import AsyncGenerator
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI, Request, status
@@ -19,6 +21,7 @@ from playlist_sync.core.errors import AppError, ErrorCode
 from playlist_sync.core.models import Library, Source
 from playlist_sync.logging_config import setup_logging
 from playlist_sync.services.jobs import JobExecutor, SSEBroadcaster
+from playlist_sync.services.scheduler import PeriodicSyncScheduler
 
 logger = logging.getLogger(__name__)
 
@@ -32,27 +35,13 @@ def create_app(
     safety_threshold: float = 0.50,
     max_retries: int = 3,
     min_disk_free_mb: int = 1024,
+    interval_hours: float = 6.0,
     log_file: str = "playlist_sync.log",
     log_level: str = "INFO",
 ) -> FastAPI:
     """Create and configure the FastAPI application instance."""
     setup_logging(log_file=log_file, level_name=log_level, force=True)
     logger.info("Initializing Playlist Sync API...")
-
-    app = FastAPI(
-        title="Playlist Sync API",
-        version="0.1.0",
-        description="Local API for managing and synchronizing YouTube playlists and podcasts.",
-    )
-
-    # CORS for local web UI
-    app.add_middleware(
-        CORSMiddleware,
-        allow_origins=["*"],
-        allow_credentials=True,
-        allow_methods=["*"],
-        allow_headers=["*"],
-    )
 
     resolved_music_root = Path(music_root).resolve()
     resolved_repo = repo or SQLiteRepo("playlist_sync.sqlite3")
@@ -71,6 +60,33 @@ def create_app(
         min_disk_free_mb=min_disk_free_mb,
     )
 
+    # Periodic background scheduler (RF-17)
+    scheduler = PeriodicSyncScheduler(job_executor=job_executor, interval_hours=interval_hours)
+
+    @asynccontextmanager
+    async def app_lifespan(_: FastAPI) -> AsyncGenerator[None, None]:
+        if interval_hours > 0:
+            scheduler.start()
+        yield
+        if interval_hours > 0:
+            await scheduler.stop()
+
+    app = FastAPI(
+        title="Playlist Sync API",
+        version="0.1.0",
+        description="Local API for managing and synchronizing YouTube playlists and podcasts.",
+        lifespan=app_lifespan,
+    )
+
+    # CORS for local web UI
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["*"],
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+
     # Store state on application instance
     app.state.repo = resolved_repo
     app.state.source_adapter = resolved_source
@@ -79,6 +95,7 @@ def create_app(
     app.state.broadcaster = resolved_broadcaster
     app.state.job_executor = job_executor
     app.state.min_disk_free_mb = min_disk_free_mb
+    app.state.scheduler = scheduler
 
     # Global AppError exception handler
     @app.exception_handler(AppError)

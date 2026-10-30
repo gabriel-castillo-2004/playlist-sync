@@ -13,6 +13,8 @@ from playlist_sync.adapters.repo import SQLiteRepo
 from playlist_sync.core.errors import AppError
 from playlist_sync.core.models import Progress, Source
 from playlist_sync.doctor import run_doctor
+from playlist_sync.services.backup import create_database_backup
+from playlist_sync.services.migration import export_sources_to_json, import_sources_from_json
 from playlist_sync.services.sync import add_source_service, sync_source_service
 
 
@@ -166,6 +168,39 @@ def cmd_status(repo: SQLiteRepo) -> int:
     return 0
 
 
+def cmd_export(repo: SQLiteRepo, file_path: str = "sources.json") -> int:
+    """Export tracked sources to JSON file."""
+    try:
+        out = export_sources_to_json(repo, file_path)
+        print(f"[OK] Fuentes exportadas exitosamente a: {out}")
+        return 0
+    except Exception as exc:
+        print(f"[ERROR] No se pudo exportar: {exc}")
+        return 1
+
+
+def cmd_import(repo: SQLiteRepo, source_adapter: Source, file_path: str = "sources.json") -> int:
+    """Import sources from JSON file."""
+    try:
+        res = import_sources_from_json(repo, source_adapter, file_path)
+        print(f"[OK] Importacion exitosa: {res['imported']} importadas, {res['skipped']} omitidas.")
+        return 0
+    except Exception as exc:
+        print(f"[ERROR] No se pudo importar: {exc}")
+        return 1
+
+
+def cmd_backup(db_path: str, backup_dir: str = "backups") -> int:
+    """Create a consistent database backup."""
+    try:
+        out = create_database_backup(db_path, backup_dir)
+        print(f"[OK] Respaldo de base de datos generado en: {out}")
+        return 0
+    except Exception as exc:
+        print(f"[ERROR] No se pudo crear respaldo: {exc}")
+        return 1
+
+
 def main() -> None:
     """CLI router for Playlist Sync."""
     if hasattr(sys.stdout, "reconfigure"):
@@ -196,6 +231,24 @@ def main() -> None:
     # Status
     subparsers.add_parser("status", help="Consultar estado de las fuentes registradas")
 
+    # Export
+    parser_export = subparsers.add_parser("export", help="Exportar fuentes a un archivo JSON")
+    parser_export.add_argument(
+        "file", nargs="?", default="sources.json", help="Ruta del archivo JSON"
+    )
+
+    # Import
+    parser_import = subparsers.add_parser("import", help="Importar fuentes desde un archivo JSON")
+    parser_import.add_argument(
+        "file", nargs="?", default="sources.json", help="Ruta del archivo JSON"
+    )
+
+    # Backup
+    parser_backup = subparsers.add_parser(
+        "backup", help="Crear un respaldo seguro de la base de datos"
+    )
+    parser_backup.add_argument("--dir", default="backups", help="Directorio destino del respaldo")
+
     # Serve
     parser_serve = subparsers.add_parser("serve", help="Iniciar servidor web local (FastAPI)")
     parser_serve.add_argument("--host", default=None, help="Dirección host a enlazar")
@@ -222,6 +275,7 @@ def main() -> None:
     min_disk_free_mb = int(str(storage_cfg.get("min_disk_free_mb", 1024)))
     safety_threshold = float(str(sync_cfg.get("safety_threshold", 0.50)))
     max_retries = int(str(sync_cfg.get("max_retries", 3)))
+    interval_hours = float(str(sync_cfg.get("interval_hours", 6.0)))
 
     repo = SQLiteRepo(db_path)
     source_adapter = CompositeSource()
@@ -243,10 +297,23 @@ def main() -> None:
     elif args.subcommand == "status":
         code = cmd_status(repo)
         sys.exit(code)
+    elif args.subcommand == "export":
+        code = cmd_export(repo, args.file)
+        sys.exit(code)
+    elif args.subcommand == "import":
+        code = cmd_import(repo, source_adapter, args.file)
+        sys.exit(code)
+    elif args.subcommand == "backup":
+        code = cmd_backup(db_path, args.dir)
+        sys.exit(code)
     elif args.subcommand == "serve":
         import uvicorn
 
         from playlist_sync.api.app import create_app
+
+        # Automatic database backup on server startup (Phase 6)
+        if Path(db_path).exists():
+            create_database_backup(db_path)
 
         raw_server = cfg.get("server")
         server_cfg: dict[str, Any] = raw_server if isinstance(raw_server, dict) else {}
@@ -262,6 +329,7 @@ def main() -> None:
             safety_threshold=safety_threshold,
             max_retries=max_retries,
             min_disk_free_mb=min_disk_free_mb,
+            interval_hours=interval_hours,
             log_file=log_file,
             log_level=log_level,
         )

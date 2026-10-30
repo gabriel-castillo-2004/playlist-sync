@@ -1,5 +1,6 @@
-# Force Linux/Unix line endings for shell scripts
+# Force Linux/Unix line endings for shell scripts and systemd units
 *.sh text eol=lf
+*.service text eol=lf
 
 # Default normalization for other files
 * text=auto

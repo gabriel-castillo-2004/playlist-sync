@@ -124,6 +124,20 @@ Este documento registra las decisiones técnicas tomadas a lo largo del proyecto
 - **Motivo:** Brindar soporte completo a programas de audio sin sobrecargar el motor yt-dlp para feeds estándar y garantizar compatibilidad con reproductores móviles.
 - **Alternativas descartadas:** Depender de yt-dlp para parsear feeds RSS de podcasts.
 
+---
+
+## ADR-011: Operación Continua, Respaldo Atómico y Migración Portátil (RNF-7, RF-16, RF-17)
+- **Fecha:** 2026-10-30
+- **Decisión:** 
+  - Para producción en Linux Mint 22.3, el arranque desatendido se configura como un servicio de systemd de usuario (`systemd/playlist-sync.service`) con `loginctl enable-linger` para mantenerse activo sin inicio de sesión gráfico.
+  - Actualización automática opcional del motor `yt-dlp` al arrancar (`start.sh` y `start.bat`), continuando con la versión instalada si no hay red (RF-16).
+  - Programador de sincronización en segundo plano (`services/scheduler.py`, RF-17) con ciclo configurable (`interval_hours` en `config.toml`, por defecto cada 6 horas).
+  - Respaldos atómicos automáticos de SQLite mediante la API `conn.backup` (`services/backup.py`) antes de iniciar el servidor.
+  - Migración portátil e independiente entre máquinas mediante `sources.json` (`services/migration.py` y subcomandos CLI `export`/`import`), garantizando la regla de una sola instancia de servidor por carpeta de música.
+- **Motivo:** Asegurar operación autónoma en la PC de destino, portabilidad total entre Linux y Windows, y protección contra pérdidas de datos.
+- **Alternativas descartadas:** Servicios de Windows complejos con permisos de Administrador o compartir la base de datos binaria de SQLite entre computadoras.
+
+
 
 
 

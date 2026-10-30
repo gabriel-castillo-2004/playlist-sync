@@ -1,0 +1,20 @@
+[Unit]
+Description=Playlist Sync - Servidor local de sincronización de música y podcasts
+Documentation=https://github.com/angel/playlist-sync
+After=network.target network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/playlist-sync
+# Auto-actualización opcional de yt-dlp al iniciar (RF-16)
+ExecStartPre=-%h/playlist-sync/.venv/bin/pip install --upgrade --no-input yt-dlp
+ExecStart=%h/playlist-sync/.venv/bin/python -m playlist_sync.main serve
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+Environment=PYTHONUNBUFFERED=1
+
+[Install]
+WantedBy=default.target

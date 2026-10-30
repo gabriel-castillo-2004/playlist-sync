@@ -5,6 +5,15 @@ Todas las modificaciones notables del proyecto se documentarán en este archivo.
 El formato se basa en [Keep a Changelog](https://keepachangelog.com/es-ES/1.0.0/).
 
 ## [Unreleased]
+### Fase 6 - Operación diaria y migración (RNF-7, RF-16, RF-17)
+- Script y servicio de usuario systemd para Linux Mint (`systemd/playlist-sync.service` y `systemd/install-service.sh`) con persistencia `loginctl enable-linger`.
+- Verificación y auto-actualización opcional del motor `yt-dlp` al arrancar el servidor (`start.sh` y `start.bat`) (RF-16).
+- Programador de sincronización en segundo plano (`services/scheduler.py`, RF-17) con ciclo configurable (`interval_hours`).
+- Respaldo atómico de base de datos SQLite antes de arrancar (`services/backup.py`).
+- Exportación e importación portátil de fuentes entre máquinas mediante `sources.json` (`services/migration.py`, `scripts/migrate_sources.py` y subcomandos CLI `export`/`import`).
+- Documentación de cierre en `README.md` y guía completa de sincronización con Syncthing en `docs/syncthing.md`.
+- Pruebas unitarias y de integración para scheduler, backup y migración JSON.
+
 ### Fase 5 - Podcasts (RSS, YouTube Podcasts y Búsqueda iTunes)
 - Adaptador de podcasts RSS (`adapters/rss_source.py`) con parsing directo de XML sin yt-dlp y descarga streaming de enclosures de audio con progreso en vivo (RF-13).
 - Adaptador de búsqueda de podcasts (`adapters/itunes_search.py`) consumiendo la API pública de Apple iTunes sin API key.
