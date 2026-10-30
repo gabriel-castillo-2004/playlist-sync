@@ -1,0 +1,15 @@
+﻿# Entornos virtuales de Python
+.venv/
+venv/
+__pycache__/
+
+# Base de datos local
+*.sqlite3
+*.db
+
+# Carpeta de destino de la música
+music_root/
+
+# Archivos de la PC local y logs
+config.toml
+*.log
