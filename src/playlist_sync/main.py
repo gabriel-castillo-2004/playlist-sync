@@ -1,17 +1,242 @@
-"""Main entrypoint for Playlist Sync."""
+"""CLI entrypoint for Playlist Sync (Phase 1)."""
 
+from __future__ import annotations
+
+import argparse
 import sys
+import tomllib
+from pathlib import Path
 
+from playlist_sync.adapters.repo import SQLiteRepo
+from playlist_sync.adapters.ytdlp_source import YtDlpSource
+from playlist_sync.core.errors import AppError
+from playlist_sync.core.models import Progress
 from playlist_sync.doctor import run_doctor
+from playlist_sync.services.sync import add_source_service, sync_source_service
+
+
+def load_config() -> dict[str, object]:
+    """Load config.toml if present, otherwise return defaults."""
+    cfg_path = Path("config.toml")
+    if cfg_path.exists():
+        try:
+            with cfg_path.open("rb") as f:
+                return tomllib.load(f)
+        except Exception:
+            pass
+    return {
+        "storage": {
+            "database_path": "playlist_sync.sqlite3",
+            "music_root": "music_root",
+            "min_disk_free_mb": 1024,
+        },
+        "sync": {
+            "safety_threshold": 0.50,
+            "max_retries": 3,
+        },
+    }
+
+
+def cli_progress_hook(progress: Progress) -> None:
+    """Print clean download progress to stderr or stdout."""
+    title = (progress.current_item_title or "")[:30]
+    speed_kb = (progress.speed_bytes_per_sec / 1024) if progress.speed_bytes_per_sec else 0
+    percent_str = f"{progress.percentage:.1f}%"
+    print(
+        f"\rDescargando: {title:<30} | {percent_str:>6} ({speed_kb:.0f} KB/s)",
+        end="",
+        flush=True,
+    )
+
+
+def cmd_add(url: str, repo: SQLiteRepo, source_adapter: YtDlpSource) -> int:
+    """Handle 'add <url>' command."""
+    print(f"Inspeccionando enlace: {url}...")
+    try:
+        source = add_source_service(repo, source_adapter, url)
+        print("\n[OK] Fuente registrada exitosamente:")
+        print(f"    ID:     {source.id}")
+        print(f"    Titulo: {source.title}")
+        print(f"    Carpeta: {source.folder_name}")
+        return 0
+    except AppError as err:
+        print(f"\n[ERROR] {err.user_message}")
+        if err.technical_detail:
+            print(f"    Detalle: {err.technical_detail}")
+        return 1
+
+
+def cmd_sync(
+    source_target: str,
+    repo: SQLiteRepo,
+    source_adapter: YtDlpSource,
+    music_root: Path,
+    safety_threshold: float,
+    max_retries: int,
+    min_disk_free_mb: int,
+) -> int:
+    """Handle 'sync <id|all>' command."""
+    if source_target.lower() == "all":
+        sources = repo.list_sources()
+        if not sources:
+            print("No hay fuentes registradas para sincronizar.")
+            return 0
+    else:
+        try:
+            source_id = int(source_target)
+        except ValueError:
+            print(f"Error: '{source_target}' no es un ID valido (debe ser un numero o 'all').")
+            return 1
+        source = repo.get_source(source_id)
+        if not source:
+            print(f"Error: No existe ninguna fuente con el ID {source_id}.")
+            return 1
+        sources = [source]
+
+    total_downloaded = 0
+    total_failed = 0
+
+    for src in sources:
+        print(f"\nSincronizando fuente #{src.id}: '{src.title}'...")
+        try:
+            res = sync_source_service(
+                repo=repo,
+                source_adapter=source_adapter,
+                source_id=src.id,
+                music_root=music_root,
+                on_progress=cli_progress_hook,
+                min_free_mb=min_disk_free_mb,
+                safety_threshold=safety_threshold,
+                max_retries=max_retries,
+            )
+            print()  # Newline after progress hook
+            print(f"[OK] Sincronizacion finalizada para '{src.title}':")
+            print(f"    Descargadas: {res.downloaded_count}")
+            print(f"    Al dia:      {res.skipped_count}")
+            print(f"    Falladas:    {res.failed_count}")
+            if res.removed_count > 0:
+                print(
+                    f"    Retiradas de la playlist remota: {res.removed_count} (archivos conservados)"
+                )
+            if res.failed_items:
+                print("    Errores:")
+                for ext_id, msg in res.failed_items:
+                    print(f"      - [{ext_id}]: {msg}")
+
+            total_downloaded += res.downloaded_count
+            total_failed += res.failed_count
+        except AppError as err:
+            print()
+            print(f"[ERROR] {err.user_message}")
+            if err.technical_detail:
+                print(f"    Detalle: {err.technical_detail}")
+            total_failed += 1
+
+    return 0 if total_failed == 0 else 1
+
+
+def cmd_status(repo: SQLiteRepo) -> int:
+    """Handle 'status' command."""
+    sources = repo.list_sources()
+    if not sources:
+        print("No hay fuentes registradas.")
+        print("Usa 'python -m playlist_sync add <url>' para agregar una playlist de YouTube.")
+        return 0
+
+    print("=" * 70)
+    print("Playlist Sync — Estado de las Fuentes")
+    print("=" * 70)
+    for src in sources:
+        items = repo.get_items_by_source(src.id)
+        downloaded = sum(1 for it in items if it.status.value == "downloaded")
+        pending = sum(1 for it in items if it.status.value == "pending")
+        errors = sum(1 for it in items if it.status.value == "error")
+
+        sync_str = src.last_sync_at.strftime("%Y-%m-%d %H:%M") if src.last_sync_at else "Nunca"
+        print(f"[{src.id}] {src.title}")
+        print(f"    Estado:       {src.status.value.upper()}")
+        print(
+            f"    Elementos:    {downloaded} descargados | {pending} pendientes | {errors} errores"
+        )
+        print(f"    Ultima sinc.: {sync_str}")
+        if src.last_error_message:
+            print(f"    Ultimo error: {src.last_error_message}")
+        print("-" * 70)
+    return 0
 
 
 def main() -> None:
-    """CLI entrypoint."""
-    if len(sys.argv) > 1 and sys.argv[1] == "doctor":
+    """CLI router for Playlist Sync."""
+    if hasattr(sys.stdout, "reconfigure"):
+        try:
+            sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+        except Exception:
+            pass
+
+    parser = argparse.ArgumentParser(
+        prog="playlist-sync",
+        description="Playlist Sync: Descarga playlists de YouTube y podcasts como MP3 locales.",
+    )
+    subparsers = parser.add_subparsers(dest="subcommand", help="Comandos disponibles")
+
+    # Doctor
+    subparsers.add_parser("doctor", help="Verificar salud y requisitos del sistema")
+
+    # Add
+    parser_add = subparsers.add_parser("add", help="Registrar una nueva playlist")
+    parser_add.add_argument("url", help="URL de la playlist publica de YouTube o YouTube Music")
+
+    # Sync
+    parser_sync = subparsers.add_parser("sync", help="Sincronizar una fuente o todas")
+    parser_sync.add_argument(
+        "target", help="ID de la fuente (ej. '1') o 'all' para sincronizar todas"
+    )
+
+    # Status
+    subparsers.add_parser("status", help="Consultar estado de las fuentes registradas")
+
+    args = parser.parse_args()
+
+    if not args.subcommand:
+        parser.print_help()
+        sys.exit(0)
+
+    if args.subcommand == "doctor":
         success = run_doctor()
         sys.exit(0 if success else 1)
-    print("Playlist Sync v0.1.0")
-    print("Usa 'python -m playlist_sync.doctor' para verificar los requisitos del sistema.")
+
+    cfg = load_config()
+    raw_storage = cfg.get("storage")
+    storage_cfg: dict[str, object] = raw_storage if isinstance(raw_storage, dict) else {}
+    raw_sync = cfg.get("sync")
+    sync_cfg: dict[str, object] = raw_sync if isinstance(raw_sync, dict) else {}
+
+    db_path = str(storage_cfg.get("database_path", "playlist_sync.sqlite3"))
+    music_root = Path(str(storage_cfg.get("music_root", "music_root")))
+    min_disk_free_mb = int(str(storage_cfg.get("min_disk_free_mb", 1024)))
+    safety_threshold = float(str(sync_cfg.get("safety_threshold", 0.50)))
+    max_retries = int(str(sync_cfg.get("max_retries", 3)))
+
+    repo = SQLiteRepo(db_path)
+    source_adapter = YtDlpSource()
+
+    if args.subcommand == "add":
+        code = cmd_add(args.url, repo, source_adapter)
+        sys.exit(code)
+    elif args.subcommand == "sync":
+        code = cmd_sync(
+            source_target=args.target,
+            repo=repo,
+            source_adapter=source_adapter,
+            music_root=music_root,
+            safety_threshold=safety_threshold,
+            max_retries=max_retries,
+            min_disk_free_mb=min_disk_free_mb,
+        )
+        sys.exit(code)
+    elif args.subcommand == "status":
+        code = cmd_status(repo)
+        sys.exit(code)
 
 
 if __name__ == "__main__":

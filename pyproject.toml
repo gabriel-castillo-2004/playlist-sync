@@ -40,7 +40,7 @@ where = ["src"]
 
 [tool.pytest.ini_options]
 minversion = "8.0"
-addopts = "-ra -q --import-mode=importlib"
+addopts = "-ra -q --import-mode=importlib -m 'not network'"
 testpaths = ["tests"]
 pythonpath = ["src"]
 asyncio_default_fixture_loop_scope = "function"

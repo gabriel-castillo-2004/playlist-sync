@@ -55,3 +55,23 @@ Este documento registra las decisiones técnicas tomadas a lo largo del proyecto
 - **Motivo:** Evitar bloqueos de base de datos o condiciones de carrera sobre los archivos de audio en la carpeta compartida o sincronizada.
 - **Alternativas descartadas:** Base de datos compartida en red o SQLite alojado en carpetas sincronizadas por Syncthing.
 
+---
+
+## ADR-005: Clasificación y normalización de errores
+- **Fecha:** 2026-10-30
+- **Decisión:** Aislamiento de todo el análisis de mensajes de error de `yt-dlp` en `core/errors.py`. Se mapean a excepciones `AppError` con códigos estándar y mensajes en español claro orientados al usuario final según la sección 6.3 de PROMPT_MAESTRO.md.
+- **Motivo:** Cumplir el principio UX "a prueba de mamá" y evitar que cambios o excepciones crudas de YouTube o yt-dlp ensucien la lógica de negocio o la interfaz.
+- **Alternativas descartadas:** Mostrar errores técnicos de yt-dlp en la CLI o UI.
+
+---
+
+## ADR-006: Sincronización incremental y umbral de seguridad (RF-12)
+- **Fecha:** 2026-10-30
+- **Decisión:** 
+  - Si una playlist remota devuelve 0 elementos o menos del 50% de `last_known_count`, la sincronización se aborta de inmediato con código `EMPTY_OR_SHRUNK`.
+  - Los elementos que desaparecen remotamente se marcan como `removed_remote = 1` en SQLite sin eliminar ningún archivo del disco.
+  - Sincronización idempotente: los elementos con estado `DOWNLOADED` se omiten automáticamente en corridas posteriores.
+- **Motivo:** Protección estricta contra pérdida de archivos o fallos temporales en las APIs de YouTube.
+- **Alternativas descartadas:** Borrado sincronizado de canciones locales.
+
+

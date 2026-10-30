@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import shutil
 import subprocess
 import sys
@@ -103,6 +104,17 @@ class SystemDoctor:
     def check_ffmpeg(self) -> CheckResult:
         """Check that ffmpeg is installed and executable."""
         path = self.which_fn("ffmpeg")
+        if not path and sys.platform == "win32" and self.which_fn is shutil.which:
+            local_app_data = os.environ.get("LOCALAPPDATA")
+            if local_app_data:
+                candidates = list(
+                    Path(local_app_data).glob(
+                        "Microsoft/WinGet/Packages/Gyan.FFmpeg*/ffmpeg*/bin/ffmpeg.exe"
+                    )
+                )
+                if candidates:
+                    path = str(candidates[0])
+
         if not path:
             return CheckResult(
                 name="ffmpeg",
@@ -114,7 +126,7 @@ class SystemDoctor:
                     "En Windows: ejecuta 'winget install Gyan.FFmpeg' y reinicia la terminal."
                 ),
             )
-        code, out = self.run_fn(["ffmpeg", "-version"])
+        code, out = self.run_fn([path, "-version"])
         if code == 0:
             first_line = out.splitlines()[0] if out else "ffmpeg presente"
             return CheckResult(
@@ -134,8 +146,17 @@ class SystemDoctor:
     def check_js_runtime(self) -> CheckResult:
         """Check for Deno (preferred) or Node.js runtime for yt-dlp."""
         deno_path = self.which_fn("deno")
+        if not deno_path and sys.platform == "win32" and self.which_fn is shutil.which:
+            local_app_data = os.environ.get("LOCALAPPDATA")
+            if local_app_data:
+                candidates = list(
+                    Path(local_app_data).glob("Microsoft/WinGet/Packages/DenoLand.Deno*/deno.exe")
+                )
+                if candidates:
+                    deno_path = str(candidates[0])
+
         if deno_path:
-            code, out = self.run_fn(["deno", "--version"])
+            code, out = self.run_fn([deno_path, "--version"])
             first_line = out.splitlines()[0] if out and code == 0 else "Deno presente"
             return CheckResult(
                 name="Runtime JS (Deno/Node)",

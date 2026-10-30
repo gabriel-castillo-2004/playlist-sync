@@ -181,9 +181,11 @@ def test_run_doctor_cli_critical_failure(
 def test_main_cli_help(capsys: pytest.CaptureFixture[str]) -> None:
     """Test main CLI entrypoint help output."""
     sys.argv = ["playlist-sync"]
-    main()
+    with pytest.raises(SystemExit) as exc:
+        main()
+    assert exc.value.code == 0
     out = capsys.readouterr().out
-    assert "Playlist Sync v0.1.0" in out
+    assert "playlist-sync" in out
 
 
 def test_main_cli_doctor(monkeypatch: pytest.MonkeyPatch) -> None:
