@@ -116,7 +116,32 @@ def sync_source_service(
         raise safety_err
 
     existing_items = {it.external_id: it for it in repo.get_items_by_source(source_id)}
-    plan = calculate_sync_plan(existing_items, remote_items, max_retries=max_retries)
+    missing_file_external_ids: set[str] = set()
+    for ext_id, item_rec in existing_items.items():
+        if item_rec.status == ItemStatus.DOWNLOADED:
+            file_exists = False
+            if item_rec.file_path:
+                f_path = Path(item_rec.file_path)
+                actual_path = f_path if f_path.is_absolute() else (music_root / f_path)
+                if not actual_path.exists():
+                    actual_path = dest_dir / f_path.name
+                file_exists = actual_path.exists()
+            if not file_exists:
+                repo.reset_item_to_pending(item_rec.id)
+                item_rec.status = ItemStatus.PENDING
+                item_rec.file_path = None
+                missing_file_external_ids.add(ext_id)
+
+    plan = calculate_sync_plan(
+        existing_items,
+        remote_items,
+        max_retries=max_retries,
+        missing_file_external_ids=missing_file_external_ids,
+    )
+
+    # 0. Restore items that reappeared in the remote playlist (H-13)
+    for restored_rec in plan.items_to_restore:
+        repo.restore_item_removed_remote(restored_rec.id)
 
     # 1. Update position changes without renaming files
     for item_rec, new_pos in plan.items_to_update_position:

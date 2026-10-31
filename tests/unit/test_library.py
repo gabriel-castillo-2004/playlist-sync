@@ -215,6 +215,105 @@ def test_rebuild_playlist_idempotency(tmp_path: Path) -> None:
     assert bytes1 == bytes2
 
 
+def test_rebuild_podcast_playlist_mixed_dates_and_timezones(tmp_path: Path) -> None:
+    """H-01: Podcast .m3u8 sorts homogeneously with mixed aware/naive datetime and None."""
+    from datetime import UTC
+
+    music_root = tmp_path / "music"
+    lib = LocalLibrary(music_root)
+    source = SourceRecord(
+        id=1,
+        kind=SourceKind.RSS_PODCAST,
+        url="http://rss",
+        title="Mixed Podcast",
+        cover_url=None,
+        folder_name="Mixed Podcast",
+        status=SourceStatus.IDLE,
+        last_sync_at=None,
+        last_error_code=None,
+        last_error_message=None,
+        last_known_count=0,
+        created_at=datetime.now(),
+    )
+    src_dir = lib.get_source_dir(source)
+    f_none_old = create_dummy_mp3(src_dir / "Ep None Old [ep1].mp3")
+    f_naive = create_dummy_mp3(src_dir / "Ep Naive [ep2].mp3")
+    f_aware = create_dummy_mp3(src_dir / "Ep Aware Newest [ep3].mp3")
+    f_none_new = create_dummy_mp3(src_dir / "Ep None New [ep4].mp3")
+
+    items = [
+        ItemRecord(
+            id=1,
+            source_id=1,
+            external_id="ep1",
+            title="Ep None Old",
+            position=1,
+            published_at=None,
+            status=ItemStatus.DOWNLOADED,
+            error_code=None,
+            error_message=None,
+            attempts=1,
+            file_path=str(f_none_old),
+            downloaded_at=datetime.now(),
+        ),
+        ItemRecord(
+            id=2,
+            source_id=1,
+            external_id="ep2",
+            title="Ep Naive",
+            position=2,
+            published_at=datetime(2025, 5, 1, 12, 0, 0),
+            status=ItemStatus.DOWNLOADED,
+            error_code=None,
+            error_message=None,
+            attempts=1,
+            file_path=str(f_naive),
+            downloaded_at=datetime.now(),
+        ),
+        ItemRecord(
+            id=3,
+            source_id=1,
+            external_id="ep3",
+            title="Ep Aware Newest",
+            position=3,
+            published_at=datetime(2025, 6, 1, 12, 0, 0, tzinfo=UTC),
+            status=ItemStatus.DOWNLOADED,
+            error_code=None,
+            error_message=None,
+            attempts=1,
+            file_path=str(f_aware),
+            downloaded_at=datetime.now(),
+        ),
+        ItemRecord(
+            id=4,
+            source_id=1,
+            external_id="ep4",
+            title="Ep None New",
+            position=4,
+            published_at=None,
+            status=ItemStatus.DOWNLOADED,
+            error_code=None,
+            error_message=None,
+            attempts=1,
+            file_path=str(f_none_new),
+            downloaded_at=datetime.now(),
+        ),
+    ]
+
+    m3u8_path = lib.rebuild_playlist_file(source, items)
+    lines = [
+        line.strip()
+        for line in m3u8_path.read_text(encoding="utf-8").splitlines()
+        if line.strip() and not line.startswith("#")
+    ]
+    assert lines == [
+        "Ep Aware Newest [ep3].mp3",
+        "Ep Naive [ep2].mp3",
+        "Ep None New [ep4].mp3",
+        "Ep None Old [ep1].mp3",
+    ]
+
+
 def test_reorder_playlist_updates_tags_without_renaming(tmp_path: Path) -> None:
     """Reordering updates TRCK tag on disk without renaming the file."""
     music_root = tmp_path / "music"
@@ -281,7 +380,10 @@ def test_finalize_item_flow(tmp_path: Path) -> None:
 def test_architecture_no_audio_file_deletion() -> None:
     """Architectural test: Ensure NO code in src/playlist_sync deletes audio or playlist files (RF-12)."""
     src_dir = Path("src/playlist_sync")
-    py_files = [p for p in src_dir.rglob("*.py") if p.name != "doctor.py"]
+    # doctor.py only deletes its .write_test_tmp probe; backup.py only prunes old .sqlite3 backups
+    # inside backup_dir behind _verify_backup_deletion_guard (never in music_root).
+    allowed_non_audio_cleanup = {"doctor.py", "backup.py"}
+    py_files = [p for p in src_dir.rglob("*.py") if p.name not in allowed_non_audio_cleanup]
     assert len(py_files) > 0
 
     dangerous_calls: list[str] = []
@@ -290,9 +392,14 @@ def test_architecture_no_audio_file_deletion() -> None:
         for node in ast.walk(tree):
             if isinstance(node, ast.Call):
                 func = node.func
-                # Detect any .unlink(), os.remove(), or os.unlink() in the entire codebase
+                # Detect any .unlink(), os.remove(), or os.unlink() in the codebase
                 if isinstance(func, ast.Attribute) and func.attr in ("unlink", "remove", "rmdir"):
                     src_line = py_file.read_text(encoding="utf-8").splitlines()[node.lineno - 1]
                     dangerous_calls.append(f"{py_file}:{node.lineno} -> {src_line.strip()}")
 
     assert not dangerous_calls, f"Dangerous deletion calls found: {dangerous_calls}"
+
+    # Verify backup.py never references .mp3 or .m3u8 and enforces _verify_backup_deletion_guard
+    backup_src = (src_dir / "services" / "backup.py").read_text(encoding="utf-8")
+    assert ".mp3" not in backup_src and ".m3u8" not in backup_src
+    assert "_verify_backup_deletion_guard" in backup_src

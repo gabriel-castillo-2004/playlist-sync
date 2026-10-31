@@ -314,6 +314,22 @@ class SQLiteRepo:
                 (item_id,),
             )
 
+    def restore_item_removed_remote(self, item_id: int) -> None:
+        """Restore removed_remote = 0 when a previously removed item reappears in the remote."""
+        with self._conn() as conn:
+            conn.execute(
+                "UPDATE items SET removed_remote = 0 WHERE id = ?;",
+                (item_id,),
+            )
+
+    def reset_item_to_pending(self, item_id: int) -> None:
+        """Reset an item whose local file is missing back to pending status."""
+        with self._conn() as conn:
+            conn.execute(
+                "UPDATE items SET status = 'pending', file_path = NULL WHERE id = ?;",
+                (item_id,),
+            )
+
     def update_item_position(self, item_id: int, position: int) -> None:
         """Update an item's position in the playlist."""
         with self._conn() as conn:

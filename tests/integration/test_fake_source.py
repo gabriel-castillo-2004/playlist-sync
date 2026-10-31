@@ -228,3 +228,79 @@ def test_sync_item_failure_recorded(tmp_path: Path) -> None:
     assert items_db["vid_bad"].status == ItemStatus.ERROR
     assert items_db["vid_bad"].attempts == 1
     assert items_db["vid_bad"].error_code == ErrorCode.NETWORK
+
+
+def test_sync_reappearing_removed_item_restores_flag_and_m3u8(tmp_path: Path) -> None:
+    """H-13: If a removed_remote=1 item reappears in the playlist, it returns to removed_remote=0 and .m3u8."""
+    db_path = tmp_path / "reappear.sqlite3"
+    music_root = tmp_path / "music_root"
+    repo = SQLiteRepo(db_path)
+
+    all_three = [
+        RemoteItem(external_id="vid1", title="Song 1", position=1, url="http://v1"),
+        RemoteItem(external_id="vid2", title="Song 2", position=2, url="http://v2"),
+        RemoteItem(external_id="vid3", title="Song 3", position=3, url="http://v3"),
+    ]
+    fake = FakeSource(title="Reappear Playlist", items=list(all_three))
+    source = add_source_service(repo, fake, "https://youtube.com/playlist?list=PLreappear")
+
+    # 1. Sync all 3 items
+    sync_source_service(repo, fake, source.id, music_root)
+    m3u8_path = music_root / source.folder_name / f"{source.folder_name}.m3u8"
+    assert "Song 3 [vid3].mp3" in m3u8_path.read_text(encoding="utf-8")
+
+    # 2. Remove vid3 remotely (2 of 3 remain = 66.7% >= 50%)
+    fake.items = all_three[:2]
+    sync_source_service(repo, fake, source.id, music_root)
+    items_after_remove = {it.external_id: it for it in repo.get_items_by_source(source.id)}
+    assert items_after_remove["vid3"].removed_remote is True
+    assert "Song 3 [vid3].mp3" not in m3u8_path.read_text(encoding="utf-8")
+
+    # 3. vid3 reappears in the remote playlist
+    fake.items = list(all_three)
+    fake.download_calls.clear()
+    sync_source_service(repo, fake, source.id, music_root)
+
+    items_after_reappear = {it.external_id: it for it in repo.get_items_by_source(source.id)}
+    assert items_after_reappear["vid3"].removed_remote is False
+    assert "Song 3 [vid3].mp3" in m3u8_path.read_text(encoding="utf-8")
+    assert fake.download_calls == []
+
+
+def test_sync_downloaded_item_with_missing_file_returns_to_pending(tmp_path: Path) -> None:
+    """H-13: A DOWNLOADED item whose file no longer exists on disk returns to pending (and redownloads)."""
+    db_path = tmp_path / "missing_file.sqlite3"
+    music_root = tmp_path / "music_root"
+    repo = SQLiteRepo(db_path)
+
+    items = [
+        RemoteItem(external_id="vid1", title="Song 1", position=1, url="http://v1"),
+        RemoteItem(external_id="vid2", title="Song 2", position=2, url="http://v2"),
+    ]
+    fake = FakeSource(title="Missing File Playlist", items=items)
+    source = add_source_service(repo, fake, "https://youtube.com/playlist?list=PLmissing")
+
+    # 1. Initial sync downloads both
+    sync_source_service(repo, fake, source.id, music_root)
+    mp3_vid1 = music_root / source.folder_name / "Song 1 [vid1].mp3"
+    assert mp3_vid1.exists()
+
+    # Simulate external loss of Song 1 [vid1].mp3 on disk and make its redownload fail first
+    # so we can observe it transitioned out of DOWNLOADED, then allow redownload to succeed
+    mp3_vid1.unlink()
+    assert not mp3_vid1.exists()
+
+    # If vid1 is temporarily absent from remote (only vid2 present, threshold 0.5 allows 1 of 2),
+    # vid1 with missing file must become PENDING in DB
+    fake.items = [items[1]]
+    sync_source_service(repo, fake, source.id, music_root)
+    items_db = {it.external_id: it for it in repo.get_items_by_source(source.id)}
+    assert items_db["vid1"].status == ItemStatus.PENDING
+
+    # When vid1 is present in remote, it is redownloaded and restored on disk
+    fake.items = items
+    fake.download_calls.clear()
+    res = sync_source_service(repo, fake, source.id, music_root)
+    assert res.downloaded_count == 1
+    assert fake.download_calls == ["vid1"]
+    assert mp3_vid1.exists()

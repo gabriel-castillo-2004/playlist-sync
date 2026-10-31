@@ -121,6 +121,7 @@ class SyncPlan:
     items_to_mark_removed: list[ItemRecord]
     items_to_update_position: list[tuple[ItemRecord, int]]
     total_remote: int
+    items_to_restore: list[ItemRecord] = field(default_factory=list)
 
 
 @dataclass

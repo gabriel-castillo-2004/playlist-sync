@@ -33,6 +33,31 @@ def test_evaluate_safety_first_sync() -> None:
     evaluate_remote_safety(last_known_count=0, remote_count=0)
 
 
+@pytest.mark.parametrize(
+    ("last_known", "remote_count"),
+    [
+        (3, 1),
+        (5, 2),
+        (7, 3),
+    ],
+)
+def test_evaluate_safety_odd_counts_abort_below_half(last_known: int, remote_count: int) -> None:
+    """H-05: 3->1 (33%), 5->2 (40%), and 7->3 (42.8%) must abort with EMPTY_OR_SHRUNK."""
+    with pytest.raises(AppError) as exc:
+        evaluate_remote_safety(
+            last_known_count=last_known, remote_count=remote_count, safety_threshold=0.50
+        )
+    assert exc.value.code == ErrorCode.EMPTY_OR_SHRUNK
+
+
+def test_evaluate_safety_exact_half_passes() -> None:
+    """H-05: 4->2 (50% exact) and 3->2 (66.7%), 5->3 (60%), 7->4 (57.1%) must not abort."""
+    evaluate_remote_safety(last_known_count=4, remote_count=2, safety_threshold=0.50)
+    evaluate_remote_safety(last_known_count=3, remote_count=2, safety_threshold=0.50)
+    evaluate_remote_safety(last_known_count=5, remote_count=3, safety_threshold=0.50)
+    evaluate_remote_safety(last_known_count=7, remote_count=4, safety_threshold=0.50)
+
+
 def test_calculate_sync_plan_all_new() -> None:
     """When DB has no items, all remote items are scheduled for download."""
     remotes = [
@@ -211,3 +236,62 @@ def test_calculate_sync_plan_position_update() -> None:
     assert len(plan.items_to_download) == 0
     assert len(plan.items_to_update_position) == 1
     assert plan.items_to_update_position[0][1] == 2
+
+
+def test_calculate_sync_plan_reappearing_removed_item_is_restored() -> None:
+    """H-13: An item with removed_remote=True that reappears in remote_items is scheduled for restore."""
+    remotes = [
+        RemoteItem(external_id="vid1", title="Song 1", position=1, url="http://vid1"),
+    ]
+    existing = {
+        "vid1": ItemRecord(
+            id=1,
+            source_id=1,
+            external_id="vid1",
+            title="Song 1",
+            position=1,
+            published_at=None,
+            status=ItemStatus.DOWNLOADED,
+            error_code=None,
+            error_message=None,
+            attempts=1,
+            file_path="music_root/Song 1 [vid1].mp3",
+            downloaded_at=None,
+            removed_remote=True,
+        ),
+    }
+    plan = calculate_sync_plan(existing_items=existing, remote_items=remotes)
+    assert len(plan.items_to_download) == 0
+    assert len(plan.items_to_restore) == 1
+    assert plan.items_to_restore[0].external_id == "vid1"
+
+
+def test_calculate_sync_plan_missing_disk_file_redownloads() -> None:
+    """H-13: A DOWNLOADED item whose file is reported missing on disk is scheduled for download."""
+    remotes = [
+        RemoteItem(external_id="vid1", title="Song 1", position=1, url="http://vid1"),
+    ]
+    existing = {
+        "vid1": ItemRecord(
+            id=1,
+            source_id=1,
+            external_id="vid1",
+            title="Song 1",
+            position=1,
+            published_at=None,
+            status=ItemStatus.DOWNLOADED,
+            error_code=None,
+            error_message=None,
+            attempts=1,
+            file_path="music_root/Song 1 [vid1].mp3",
+            downloaded_at=None,
+            removed_remote=False,
+        ),
+    }
+    plan = calculate_sync_plan(
+        existing_items=existing,
+        remote_items=remotes,
+        missing_file_external_ids={"vid1"},
+    )
+    assert len(plan.items_to_download) == 1
+    assert plan.items_to_download[0].external_id == "vid1"

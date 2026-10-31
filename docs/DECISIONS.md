@@ -147,4 +147,16 @@ Este documento registra las decisiones técnicas tomadas a lo largo del proyecto
 - **Motivo:** Resolver los hallazgos H-08 (parte de dependencias) y H-14 de la auditoría independiente y garantizar descargas reales e idempotentes desde YouTube.
 - **Alternativas descartadas:** Mantener `yt-dlp` sin extras (omisivo frente a `yt-dlp-ejs`) o usar `glob` sin escapar corchetes.
 
+---
+
+## ADR-013: Etapa R1 — Umbral flotante RF-12, rotación/restauración de respaldos SQLite con guarda, restauración de ítems y ordenamiento `.m3u8` de podcasts (H-05, H-02, H-13, H-01)
+- **Fecha:** 2026-10-30
+- **Decisión:**
+  - **H-05:** Evaluar el umbral de seguridad RF-12 usando comparación flotante directa (`remote_count < last_known_count * safety_threshold`) y `math.ceil` para el mínimo permitido en el detalle técnico, evitando el truncamiento entero que permitía caídas por debajo del 50 % en conteos impares (ej. 3→1, 5→2, 7→3).
+  - **H-02:** Eliminar el truncamiento a 0 bytes en `services/backup.py`. Los respaldos se almacenan exclusivamente en su carpeta dedicada (prohibiendo `music_root`) con sello de microsegundos, y la rotación elimina solo los archivos `playlist_sync_backup_*.sqlite3` excedentes tras validar `_verify_backup_deletion_guard(candidate, backup_dir)`. Se acota la prueba AST (`test_architecture_no_audio_file_deletion`) para permitir el borrado de respaldos `.sqlite3` en `backup.py` comprobando que `backup.py` jamás referencie `.mp3`/`.m3u8` y exija `_verify_backup_deletion_guard`. Se implementa `restore_database_backup(backup_file, db_path)` usando `PRAGMA integrity_check` + `conn.backup` y el subcomando CLI `restore-backup`.
+  - **H-13:** En `calculate_sync_plan` y `sync_source_service`, si un elemento con `removed_remote=1` reaparece en la fuente remota con su archivo en disco intacto, se incluye en `plan.items_to_restore` y vuelve a `removed_remote=0` y al `.m3u8` sin redescargarse. Si un elemento `DOWNLOADED` ya no tiene su archivo en disco, se restablece a `pending` en SQLite y se vuelve a descargar si sigue presente en la fuente remota.
+  - **H-01:** En `LocalLibrary.rebuild_playlist_file`, ordenar los episodios de podcasts mediante la clave homogénea `(_normalize_pub_date(pair[0].published_at), pair[0].id)`, convirtiendo fechas con zona horaria a UTC naive y usando `datetime.min` cuando `published_at` es `None`.
+- **Motivo:** Garantizar la integridad de RF-12, la validez de los respaldos SQLite y la generación determinista de listas `.m3u8`.
+- **Alternativas descartadas:** Truncar respaldos a 0 bytes o ignorar la pérdida externa de archivos `.mp3` en ítems marcados como `DOWNLOADED`.
+
 

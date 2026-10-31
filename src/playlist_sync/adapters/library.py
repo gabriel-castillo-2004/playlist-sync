@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from datetime import UTC, datetime
 from pathlib import Path
 
 import httpx
@@ -41,6 +42,15 @@ def parse_artist_and_title(raw_title: str, fallback_artist: str) -> tuple[str, s
             if artist and title:
                 return artist, title
     return fallback_artist, raw_title.strip()
+
+
+def _normalize_pub_date(dt: datetime | None) -> datetime:
+    """Normalize published_at to a timezone-naive UTC datetime for homogeneous sorting."""
+    if dt is None:
+        return datetime.min
+    if dt.tzinfo is not None:
+        return dt.astimezone(UTC).replace(tzinfo=None)
+    return dt
 
 
 def download_cover_image(url: str, dest_path: Path) -> bool:
@@ -217,7 +227,7 @@ class LocalLibrary:
         # Sort order: for podcasts, newest first (by published_at); for playlists, by position ASC
         if source.kind in (SourceKind.YT_PODCAST, SourceKind.RSS_PODCAST):
             valid_items.sort(
-                key=lambda pair: pair[0].published_at or pair[0].id,
+                key=lambda pair: (_normalize_pub_date(pair[0].published_at), pair[0].id),
                 reverse=True,
             )
         else:

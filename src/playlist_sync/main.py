@@ -13,7 +13,7 @@ from playlist_sync.adapters.repo import SQLiteRepo
 from playlist_sync.core.errors import AppError
 from playlist_sync.core.models import Progress, Source
 from playlist_sync.doctor import run_doctor
-from playlist_sync.services.backup import create_database_backup
+from playlist_sync.services.backup import create_database_backup, restore_database_backup
 from playlist_sync.services.migration import export_sources_to_json, import_sources_from_json
 from playlist_sync.services.sync import add_source_service, sync_source_service
 
@@ -201,6 +201,17 @@ def cmd_backup(db_path: str, backup_dir: str = "backups") -> int:
         return 1
 
 
+def cmd_restore_backup(backup_file: str, db_path: str) -> int:
+    """Restore the SQLite database from a backup file."""
+    try:
+        out = restore_database_backup(backup_file, db_path)
+        print(f"[OK] Base de datos restaurada exitosamente en: {out}")
+        return 0
+    except Exception as exc:
+        print(f"[ERROR] No se pudo restaurar el respaldo: {exc}")
+        return 1
+
+
 def main() -> None:
     """CLI router for Playlist Sync."""
     if hasattr(sys.stdout, "reconfigure"):
@@ -248,6 +259,12 @@ def main() -> None:
         "backup", help="Crear un respaldo seguro de la base de datos"
     )
     parser_backup.add_argument("--dir", default="backups", help="Directorio destino del respaldo")
+
+    # Restore backup
+    parser_restore = subparsers.add_parser(
+        "restore-backup", help="Restaurar la base de datos desde un archivo de respaldo"
+    )
+    parser_restore.add_argument("backup_file", help="Ruta del archivo de respaldo .sqlite3")
 
     # Serve
     parser_serve = subparsers.add_parser("serve", help="Iniciar servidor web local (FastAPI)")
@@ -305,6 +322,9 @@ def main() -> None:
         sys.exit(code)
     elif args.subcommand == "backup":
         code = cmd_backup(db_path, args.dir)
+        sys.exit(code)
+    elif args.subcommand == "restore-backup":
+        code = cmd_restore_backup(args.backup_file, db_path)
         sys.exit(code)
     elif args.subcommand == "serve":
         import uvicorn
