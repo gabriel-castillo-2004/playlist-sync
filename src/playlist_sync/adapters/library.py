@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import logging
+import shutil
+import subprocess
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -53,14 +55,68 @@ def _normalize_pub_date(dt: datetime | None) -> datetime:
     return dt
 
 
+def _is_webp_bytes(data: bytes) -> bool:
+    """Return True if data starts with a RIFF....WEBP header."""
+    return len(data) >= 12 and data[:4] == b"RIFF" and data[8:12] == b"WEBP"
+
+
+def _convert_webp_to_jpeg_bytes(webp_bytes: bytes) -> bytes | None:
+    """Attempt to convert WebP image bytes to JPEG using ffmpeg with shell=False."""
+    ffmpeg_bin = shutil.which("ffmpeg")
+    if not ffmpeg_bin:
+        return None
+    try:
+        proc = subprocess.run(
+            [
+                ffmpeg_bin,
+                "-hide_banner",
+                "-loglevel",
+                "error",
+                "-f",
+                "webp",
+                "-i",
+                "pipe:0",
+                "-frames:v",
+                "1",
+                "-f",
+                "image2",
+                "-vcodec",
+                "mjpeg",
+                "pipe:1",
+            ],
+            input=webp_bytes,
+            capture_output=True,
+            check=False,
+            shell=False,
+        )
+        if proc.returncode == 0 and proc.stdout.startswith(b"\xff\xd8\xff"):
+            return proc.stdout
+    except Exception:
+        pass
+    return None
+
+
+def _normalize_cover_bytes_and_mime(cover_bytes: bytes) -> tuple[bytes, str]:
+    """Detect image MIME type and convert WebP covers to JPEG when possible."""
+    if _is_webp_bytes(cover_bytes):
+        converted = _convert_webp_to_jpeg_bytes(cover_bytes)
+        if converted is not None:
+            return converted, "image/jpeg"
+        return cover_bytes, "image/webp"
+    if cover_bytes.startswith(b"\x89PNG"):
+        return cover_bytes, "image/png"
+    return cover_bytes, "image/jpeg"
+
+
 def download_cover_image(url: str, dest_path: Path) -> bool:
-    """Download cover image from URL and save to dest_path."""
+    """Download cover image from URL and save to dest_path (converting WebP to JPEG if possible)."""
     try:
         dest_path.parent.mkdir(parents=True, exist_ok=True)
         with httpx.Client(timeout=15.0, follow_redirects=True) as client:
             resp = client.get(url)
             if resp.status_code == 200 and len(resp.content) > 0:
-                dest_path.write_bytes(resp.content)
+                img_bytes, _ = _normalize_cover_bytes_and_mime(resp.content)
+                dest_path.write_bytes(img_bytes)
                 return True
     except Exception as exc:
         logger.warning("Could not download cover image from %s: %s", url, exc)
@@ -95,8 +151,7 @@ def apply_id3_tags(
         tags.setall("TDRC", [TDRC(encoding=3, text=published_date)])
 
     if cover_bytes:
-        # Determine MIME type
-        mime = "image/png" if cover_bytes.startswith(b"\x89PNG") else "image/jpeg"
+        final_cover, mime = _normalize_cover_bytes_and_mime(cover_bytes)
         tags.setall(
             "APIC",
             [
@@ -105,7 +160,7 @@ def apply_id3_tags(
                     mime=mime,
                     type=3,  # Front cover
                     desc="Cover",
-                    data=cover_bytes,
+                    data=final_cover,
                 )
             ],
         )
@@ -161,7 +216,8 @@ class LocalLibrary:
         cover_path = self.ensure_source_cover(source)
         cover_bytes = cover_path.read_bytes() if cover_path and cover_path.exists() else None
 
-        artist, song_title = parse_artist_and_title(item.title, fallback_artist=source.title)
+        fallback_artist = item.artist or source.title
+        artist, song_title = parse_artist_and_title(item.title, fallback_artist=fallback_artist)
         genre = (
             "Podcast" if source.kind in (SourceKind.YT_PODCAST, SourceKind.RSS_PODCAST) else None
         )
@@ -235,7 +291,8 @@ class LocalLibrary:
 
         lines: list[str] = ["#EXTM3U"]
         for it, actual_path in valid_items:
-            artist, title = parse_artist_and_title(it.title, fallback_artist=source.title)
+            fallback_artist = it.artist or source.title
+            artist, title = parse_artist_and_title(it.title, fallback_artist=fallback_artist)
             lines.append(f"#EXTINF:-1,{artist} - {title}")
             lines.append(actual_path.name)  # Strictly relative to source folder
 

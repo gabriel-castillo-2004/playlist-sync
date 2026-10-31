@@ -100,10 +100,16 @@ def test_ytdlp_list_items_mocked() -> None:
     )
     fake_info = {
         "entries": [
-            {"id": "v1", "title": "Track 1", "upload_date": "20240101", "duration": 180},
+            {
+                "id": "v1",
+                "title": "Track 1",
+                "upload_date": "20240101",
+                "duration": 180,
+                "uploader": "Canal Uno",
+            },
             {"id": "v2", "title": "[Deleted video]"},
             None,
-            {"id": "v3", "title": "Track 3", "duration": 200},
+            {"id": "v3", "title": "Track 3", "duration": 200, "channel": "Canal Tres"},
         ]
     }
     with patch("yt_dlp.YoutubeDL") as mock_ydl_cls:
@@ -116,8 +122,10 @@ def test_ytdlp_list_items_mocked() -> None:
         assert len(items) == 2
         assert items[0].external_id == "v1"
         assert items[0].position == 1
+        assert items[0].artist == "Canal Uno"
         assert items[1].external_id == "v3"
         assert items[1].position == 2
+        assert items[1].artist == "Canal Tres"
 
 
 def test_ytdlp_download_mocked(tmp_path: Path) -> None:

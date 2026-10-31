@@ -377,12 +377,69 @@ def test_finalize_item_flow(tmp_path: Path) -> None:
     assert str(tags["TDRC"].text[0]) == "2025-01-01"
 
 
+def test_finalize_item_uses_item_artist_and_handles_webp_cover(tmp_path: Path) -> None:
+    """H-15: finalize_item uses item.artist (from uploader/itunes:author) and handles WebP covers."""
+    music_root = tmp_path / "music"
+    lib = LocalLibrary(music_root)
+    source = SourceRecord(
+        id=1,
+        kind=SourceKind.RSS_PODCAST,
+        url="http://pod",
+        title="Charlas de Tecnología",
+        cover_url=None,
+        folder_name="Charlas de Tecnología",
+        status=SourceStatus.IDLE,
+        last_sync_at=None,
+        last_error_code=None,
+        last_error_message=None,
+        last_known_count=0,
+        created_at=datetime.now(),
+    )
+    src_dir = lib.get_source_dir(source)
+    audio_file = create_dummy_mp3(src_dir / "Episodio 2 [ep2].mp3")
+
+    # Write a WebP cover header to cover.jpg (as YouTube often serves WebP thumbnails)
+    webp_bytes = b"RIFF\x24\x00\x00\x00WEBPVP8 " + b"\x00" * 20
+    (src_dir / "cover.jpg").write_bytes(webp_bytes)
+    source.cover_url = "https://example.com/cover.webp"
+
+    item = ItemRecord(
+        id=1,
+        source_id=1,
+        external_id="ep2",
+        title="Episodio 2: Agentes y Modelos de Lenguaje",
+        position=1,
+        published_at=datetime(2026, 10, 24),
+        status=ItemStatus.DOWNLOADING,
+        error_code=None,
+        error_message=None,
+        attempts=1,
+        file_path=str(audio_file),
+        downloaded_at=None,
+        artist="María Ingeniera",
+    )
+    dl = DownloadedFile(file_path=audio_file, external_id="ep2", title=item.title)
+
+    final_path = lib.finalize_item(source, item, dl, total_items=2)
+    tags = ID3(str(final_path))
+    assert str(tags["TPE1"].text[0]) == "María Ingeniera"
+    assert str(tags["TALB"].text[0]) == "Charlas de Tecnología"
+    apic = tags.getall("APIC")[0]
+    # Must either be converted to genuine JPEG or tagged as image/webp (never WebP bytes tagged as image/jpeg)
+    if apic.data.startswith(b"RIFF") and apic.data[8:12] == b"WEBP":
+        assert apic.mime == "image/webp"
+    else:
+        assert apic.mime == "image/jpeg"
+        assert apic.data.startswith(b"\xff\xd8\xff")
+
+
 def test_architecture_no_audio_file_deletion() -> None:
     """Architectural test: Ensure NO code in src/playlist_sync deletes audio or playlist files (RF-12)."""
     src_dir = Path("src/playlist_sync")
     # doctor.py only deletes its .write_test_tmp probe; backup.py only prunes old .sqlite3 backups
-    # inside backup_dir behind _verify_backup_deletion_guard (never in music_root).
-    allowed_non_audio_cleanup = {"doctor.py", "backup.py"}
+    # inside backup_dir behind _verify_backup_deletion_guard; rss_source.py only cleans .part files
+    # behind _cleanup_part_file (never .mp3 or .m3u8).
+    allowed_non_audio_cleanup = {"doctor.py", "backup.py", "rss_source.py"}
     py_files = [p for p in src_dir.rglob("*.py") if p.name not in allowed_non_audio_cleanup]
     assert len(py_files) > 0
 
@@ -403,3 +460,8 @@ def test_architecture_no_audio_file_deletion() -> None:
     backup_src = (src_dir / "services" / "backup.py").read_text(encoding="utf-8")
     assert ".mp3" not in backup_src and ".m3u8" not in backup_src
     assert "_verify_backup_deletion_guard" in backup_src
+
+    # Verify rss_source.py only unlinks inside _cleanup_part_file with .endswith(".part") guard
+    rss_src = (src_dir / "adapters" / "rss_source.py").read_text(encoding="utf-8")
+    assert 'resolved_part.name.endswith(".part")' in rss_src
+    assert rss_src.count(".unlink(") == 1

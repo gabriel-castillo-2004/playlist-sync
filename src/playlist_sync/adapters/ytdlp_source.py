@@ -179,6 +179,16 @@ class YtDlpSource:
             if not item_url.startswith("http"):
                 item_url = f"https://www.youtube.com/watch?v={video_id}"
 
+            raw_artist = (
+                entry.get("artist")
+                or entry.get("creator")
+                or entry.get("uploader")
+                or entry.get("channel")
+                or info.get("uploader")
+                or info.get("channel")
+            )
+            artist = str(raw_artist).strip() if raw_artist else None
+
             remote_items.append(
                 RemoteItem(
                     external_id=str(video_id),
@@ -188,6 +198,7 @@ class YtDlpSource:
                     published_at=pub_date,
                     duration_seconds=entry.get("duration"),
                     thumbnail_url=entry.get("thumbnail"),
+                    artist=artist,
                 )
             )
             position += 1

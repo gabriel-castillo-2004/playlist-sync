@@ -159,4 +159,15 @@ Este documento registra las decisiones técnicas tomadas a lo largo del proyecto
 - **Motivo:** Garantizar la integridad de RF-12, la validez de los respaldos SQLite y la generación determinista de listas `.m3u8`.
 - **Alternativas descartadas:** Truncar respaldos a 0 bytes o ignorar la pérdida externa de archivos `.mp3` en ítems marcados como `DOWNLOADED`.
 
+---
+
+## ADR-014: Etapa R2 — Conversión de enclosures no-MP3 con `ffmpeg`, verificación de `Content-Length`, reanudación `Range` y metadatos `artist`/WebP (H-06, H-07, H-15)
+- **Fecha:** 2026-10-30
+- **Decisión:**
+  - **H-06:** En `RssSource.download`, detectar si el archivo descargado no es MP3 (por cabecera mágica distinta de `ID3`/sync MPEG, por `Content-Type` o por extensión de URL `.m4a`/`.ogg`/`.opus`/`.aac`/`.wav`/`.flac`) y convertirlo a MP3 mediante `ffmpeg` invocando `subprocess.run(..., shell=False)` con lista de argumentos hacia un archivo `.conv.part` antes de renombrarlo al `.mp3` final.
+  - **H-07:** Verificar estrictamente `downloaded_bytes == total_bytes` (`Content-Length`) antes de mover el `.part` al `.mp3` definitivo. Si la descarga se corta a mitad de camino y el servidor anuncia soporte `Range` (`Accept-Ranges: bytes` / `206 Partial Content`), reanudar automáticamente enviando `Range: bytes=<offset>-` en modo `"ab"`; si el servidor responde `200 OK`, reiniciar desde el byte 0 en modo `"wb"`. Si la descarga falla definitivamente, limpiar los archivos `.part` mediante `_cleanup_part_file` (que exige sufijo `.part` dentro de `dest_dir`, acotado en `test_architecture_no_audio_file_deletion`) sin tocar jamás archivos `.mp3` completos.
+  - **H-15:** Añadir el campo `artist: str | None = None` a `RemoteItem` e `ItemRecord` (y migración automática `ALTER TABLE items ADD COLUMN artist TEXT` en `SQLiteRepo`), poblándolo desde `artist`/`creator`/`uploader`/`channel` en `YtDlpSource` y desde `itunes:author`/`author`/`managingEditor` en `RssSource`. En `LocalLibrary`, usar `item.artist or source.title` como `fallback_artist` y detectar portadas WebP (`RIFF....WEBP`), convirtiéndolas a JPEG con `ffmpeg` (`shell=False`) o etiquetando `image/webp` si la conversión no está disponible.
+- **Motivo:** Cumplir RF-6, RF-13 y la sección 6.2/9 de `PROMPT_MAESTRO.md` evitando archivos `.m4a`/`.ogg` renombrados como `.mp3`, descargas truncadas y etiquetas `TPE1`/`APIC` inexactas.
+- **Alternativas descartadas:** Guardar bytes crudos sin verificar `Content-Length` o sin transcodificar contenedores no-MP3.
+
 

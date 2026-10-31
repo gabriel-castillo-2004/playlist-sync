@@ -51,6 +51,7 @@ class RemoteItem:
     published_at: datetime | None = None
     duration_seconds: int | None = None
     thumbnail_url: str | None = None
+    artist: str | None = None
 
 
 @dataclass(frozen=True)
@@ -111,6 +112,7 @@ class ItemRecord:
     file_path: str | None
     downloaded_at: datetime | None
     removed_remote: bool = False
+    artist: str | None = None
 
 
 @dataclass

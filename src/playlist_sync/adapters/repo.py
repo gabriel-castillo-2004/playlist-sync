@@ -43,6 +43,7 @@ CREATE TABLE IF NOT EXISTS items (
     source_id INTEGER NOT NULL REFERENCES sources(id) ON DELETE CASCADE,
     external_id TEXT NOT NULL,
     title TEXT NOT NULL,
+    artist TEXT,
     position INTEGER NOT NULL,
     published_at TEXT,
     status TEXT NOT NULL DEFAULT 'pending',
@@ -114,6 +115,11 @@ class SQLiteRepo:
                     "INSERT INTO schema_version (version, applied_at) VALUES (1, ?);",
                     (datetime.now(UTC).isoformat(),),
                 )
+            cols = {
+                col_row["name"] for col_row in conn.execute("PRAGMA table_info(items);").fetchall()
+            }
+            if "artist" not in cols:
+                conn.execute("ALTER TABLE items ADD COLUMN artist TEXT;")
 
     # -------------------------------------------------------------------------
     # Sources CRUD
@@ -230,6 +236,7 @@ class SQLiteRepo:
         title: str,
         position: int,
         published_at: datetime | None = None,
+        artist: str | None = None,
     ) -> ItemRecord:
         """Insert or update position/title of an item without resetting download status."""
         pub_str = published_at.isoformat() if published_at else None
@@ -237,16 +244,17 @@ class SQLiteRepo:
             conn.execute(
                 """
                 INSERT INTO items (
-                    source_id, external_id, title, position, published_at,
+                    source_id, external_id, title, artist, position, published_at,
                     status, attempts, removed_remote
-                ) VALUES (?, ?, ?, ?, ?, 'pending', 0, 0)
+                ) VALUES (?, ?, ?, ?, ?, ?, 'pending', 0, 0)
                 ON CONFLICT(source_id, external_id) DO UPDATE SET
                     title = excluded.title,
+                    artist = COALESCE(excluded.artist, items.artist),
                     position = excluded.position,
                     published_at = COALESCE(excluded.published_at, items.published_at),
                     removed_remote = 0;
                 """,
-                (source_id, external_id, title, position, pub_str),
+                (source_id, external_id, title, artist, position, pub_str),
             )
             row = conn.execute(
                 "SELECT * FROM items WHERE source_id = ? AND external_id = ?;",
@@ -387,6 +395,7 @@ class SQLiteRepo:
 
     @classmethod
     def _row_to_item(cls, row: sqlite3.Row) -> ItemRecord:
+        row_keys = row.keys()
         return ItemRecord(
             id=row["id"],
             source_id=row["source_id"],
@@ -401,4 +410,5 @@ class SQLiteRepo:
             file_path=row["file_path"],
             downloaded_at=cls._parse_dt(row["downloaded_at"]),
             removed_remote=bool(row["removed_remote"]),
+            artist=row["artist"] if "artist" in row_keys else None,
         )

@@ -165,6 +165,7 @@ def sync_source_service(
             title=remote_item.title,
             position=remote_item.position,
             published_at=remote_item.published_at,
+            artist=remote_item.artist,
         )
         repo.update_item_status(db_item.id, ItemStatus.DOWNLOADING)
 
