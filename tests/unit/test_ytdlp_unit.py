@@ -146,3 +146,54 @@ def test_ytdlp_download_mocked(tmp_path: Path) -> None:
         res = adapter.download(item, dest_dir, on_progress=progress_events.append)
         assert res.file_path == expected_file
         assert res.external_id == "v_dl"
+
+
+def test_ytdlp_download_fallback_locates_mp3_by_real_11char_external_id(tmp_path: Path) -> None:
+    """H-14: Fallback lookup must find ' [external_id].mp3' literally, not as a glob char class."""
+    adapter = YtDlpSource()
+    real_id = "dQw4w9WgXcQ"  # 11-char YouTube video ID
+    item = RemoteItem(
+        external_id=real_id,
+        title="Canción Original",
+        position=1,
+        url=f"https://www.youtube.com/watch?v={real_id}",
+    )
+    dest_dir = tmp_path / "music"
+    dest_dir.mkdir(parents=True, exist_ok=True)
+
+    # Unrelated file ending in 'Q.mp3' that a broken glob '*[dQw4w9WgXcQ].mp3' would match
+    decoy_file = dest_dir / "Otra cancion Q.mp3"
+    decoy_file.write_bytes(b"DECOY")
+
+    # Simulate yt-dlp slightly altering the title when writing the MP3
+    actual_downloaded_mp3 = dest_dir / f"Cancion Original Normalizada [{real_id}].mp3"
+
+    def mock_download(urls: list[str]) -> None:
+        actual_downloaded_mp3.write_bytes(b"REAL_MP3_DATA")
+
+    with patch("yt_dlp.YoutubeDL") as mock_ydl_cls:
+        mock_ydl = MagicMock()
+        mock_ydl.__enter__.return_value = mock_ydl
+        mock_ydl.download.side_effect = mock_download
+        mock_ydl_cls.return_value = mock_ydl
+
+        res = adapter.download(item, dest_dir)
+        assert res.file_path == actual_downloaded_mp3
+        assert res.file_path != decoy_file
+
+
+def test_ytdlp_default_extra_and_ejs_dependency_configured() -> None:
+    """H-08 (deps): Verify yt-dlp[default] is configured across project files and yt_dlp_ejs is installed."""
+    import importlib.util
+
+    root = Path(__file__).resolve().parent.parent.parent
+    pyproject_text = (root / "pyproject.toml").read_text(encoding="utf-8")
+    start_sh_text = (root / "start.sh").read_text(encoding="utf-8")
+    start_bat_text = (root / "start.bat").read_text(encoding="utf-8")
+    service_text = (root / "systemd" / "playlist-sync.service").read_text(encoding="utf-8")
+
+    assert "yt-dlp[default]" in pyproject_text
+    assert "yt-dlp[default]" in start_sh_text
+    assert "yt-dlp[default]" in start_bat_text
+    assert "yt-dlp[default]" in service_text
+    assert importlib.util.find_spec("yt_dlp_ejs") is not None

@@ -262,8 +262,11 @@ class YtDlpSource:
             raise classify_ytdlp_error(exc) from exc
 
         if not expected_mp3.exists():
-            # In case title was slightly altered by yt-dlp sanitize, search matching external_id
-            candidates = list(dest_dir.glob(f"*[{item.external_id}].mp3"))
+            # In case title was slightly altered by yt-dlp sanitize, search matching [external_id].mp3 literally
+            suffix = f"[{item.external_id}].mp3"
+            candidates = sorted(
+                p for p in dest_dir.iterdir() if p.is_file() and p.name.endswith(suffix)
+            )
             if candidates:
                 return DownloadedFile(
                     file_path=candidates[0],

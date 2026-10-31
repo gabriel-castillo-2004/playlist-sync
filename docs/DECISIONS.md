@@ -137,9 +137,14 @@ Este documento registra las decisiones técnicas tomadas a lo largo del proyecto
 - **Motivo:** Asegurar operación autónoma en la PC de destino, portabilidad total entre Linux y Windows, y protección contra pérdidas de datos.
 - **Alternativas descartadas:** Servicios de Windows complejos con permisos de Administrador o compartir la base de datos binaria de SQLite entre computadoras.
 
+---
 
-
-
-
+## ADR-012: Etapa R0 — Dependencia `yt-dlp[default]` (`yt-dlp-ejs` para Deno) y búsqueda literal de `[external_id].mp3` (H-08, H-14)
+- **Fecha:** 2026-10-30
+- **Decisión:**
+  - Especificar `yt-dlp[default]>=2025.2.19` en `pyproject.toml` y `"yt-dlp[default]"` en `start.sh`, `start.bat` y `systemd/playlist-sync.service`. Esto instala `yt-dlp-ejs` (junto con `brotli`, `pycryptodomex`, `requests`, `urllib3`, `certifi`, `mutagen`, `websockets`), proveyendo los scripts EJS locales que Deno necesita para resolver los desafíos de firma (`n`-challenge y signature cipher) de YouTube sin depender de descargas remotas de scripts en tiempo de ejecución.
+  - En `YtDlpSource.download` (`src/playlist_sync/adapters/ytdlp_source.py`), reemplazar `dest_dir.glob(f"*[{item.external_id}].mp3")` por una búsqueda literal por sufijo (`p.name.endswith(f"[{item.external_id}].mp3")`) sobre `dest_dir.iterdir()`, evitando que `Path.glob` interprete los corchetes `[...]` como una clase de caracteres comodín.
+- **Motivo:** Resolver los hallazgos H-08 (parte de dependencias) y H-14 de la auditoría independiente y garantizar descargas reales e idempotentes desde YouTube.
+- **Alternativas descartadas:** Mantener `yt-dlp` sin extras (omisivo frente a `yt-dlp-ejs`) o usar `glob` sin escapar corchetes.
 
 

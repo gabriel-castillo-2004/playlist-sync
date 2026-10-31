@@ -9,7 +9,7 @@ if not exist ".venv\Scripts\python.exe" (
 )
 
 echo [1/2] Verificando actualizacion del motor de descargas (RF-16)...
-".venv\Scripts\pip.exe" install --upgrade --no-input yt-dlp >nul 2>&1
+".venv\Scripts\pip.exe" install --upgrade --no-input "yt-dlp[default]" >nul 2>&1
 if %ERRORLEVEL% neq 0 (
     echo [AVISO] No se pudo actualizar yt-dlp automaticamente; continuando con la version local instalada.
 ) else (

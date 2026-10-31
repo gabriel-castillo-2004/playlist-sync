@@ -8,7 +8,7 @@ if [ ! -d ".venv" ]; then
 fi
 
 echo "[1/2] Verificando actualización del motor de descargas (RF-16)..."
-.venv/bin/pip install --upgrade --no-input yt-dlp >/dev/null 2>&1 || echo "[AVISO] No se pudo actualizar yt-dlp automáticamente; continuando con la versión instalada."
+.venv/bin/pip install --upgrade --no-input "yt-dlp[default]" >/dev/null 2>&1 || echo "[AVISO] No se pudo actualizar yt-dlp automáticamente; continuando con la versión instalada."
 
 echo "[2/2] Iniciando Playlist Sync..."
 if [ $# -eq 0 ]; then

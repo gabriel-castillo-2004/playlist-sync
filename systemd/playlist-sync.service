@@ -8,7 +8,7 @@ Wants=network-online.target
 Type=simple
 WorkingDirectory=%h/playlist-sync
 # Auto-actualización opcional de yt-dlp al iniciar (RF-16)
-ExecStartPre=-%h/playlist-sync/.venv/bin/pip install --upgrade --no-input yt-dlp
+ExecStartPre=-%h/playlist-sync/.venv/bin/pip install --upgrade --no-input "yt-dlp[default]"
 ExecStart=%h/playlist-sync/.venv/bin/python -m playlist_sync.main serve
 Restart=always
 RestartSec=10
@@ -18,3 +18,4 @@ Environment=PYTHONUNBUFFERED=1
 
 [Install]
 WantedBy=default.target
+
