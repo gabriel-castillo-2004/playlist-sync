@@ -30,6 +30,7 @@ from playlist_sync.core.models import (
     SourceKind,
     SourceRecord,
 )
+from playlist_sync.core.url_security import MAX_COVER_BYTES, validate_external_url
 
 logger = logging.getLogger(__name__)
 
@@ -108,16 +109,51 @@ def _normalize_cover_bytes_and_mime(cover_bytes: bytes) -> tuple[bytes, str]:
     return cover_bytes, "image/jpeg"
 
 
-def download_cover_image(url: str, dest_path: Path) -> bool:
-    """Download cover image from URL and save to dest_path (converting WebP to JPEG if possible)."""
+def _validate_cover_request(request: httpx.Request) -> None:
+    """Validate cover image request and redirect targets against SSRF (H-03)."""
+    validate_external_url(str(request.url))
+
+
+def download_cover_image(
+    url: str,
+    dest_path: Path,
+    max_bytes: int = MAX_COVER_BYTES,
+) -> bool:
+    """Download cover image from URL and save to dest_path (with SSRF protection and size cap)."""
     try:
+        validated_url = validate_external_url(url)
         dest_path.parent.mkdir(parents=True, exist_ok=True)
         with httpx.Client(timeout=15.0, follow_redirects=True) as client:
-            resp = client.get(url)
-            if resp.status_code == 200 and len(resp.content) > 0:
-                img_bytes, _ = _normalize_cover_bytes_and_mime(resp.content)
-                dest_path.write_bytes(img_bytes)
-                return True
+            req_hooks = client.event_hooks.setdefault("request", [])
+            if _validate_cover_request not in req_hooks:
+                req_hooks.append(_validate_cover_request)
+
+            with client.stream("GET", validated_url) as resp:
+                if resp.status_code != 200:
+                    return False
+
+                cl_header = resp.headers.get("content-length")
+                if cl_header and cl_header.isdigit() and int(cl_header) > max_bytes:
+                    logger.warning("Cover image at %s exceeds max size (%s bytes)", url, cl_header)
+                    return False
+
+                chunks = bytearray()
+                for chunk in resp.iter_bytes(chunk_size=65536):
+                    if not chunk:
+                        continue
+                    chunks.extend(chunk)
+                    if len(chunks) > max_bytes:
+                        logger.warning(
+                            "Cover image stream from %s exceeded max size (%d bytes)",
+                            url,
+                            max_bytes,
+                        )
+                        return False
+
+                if len(chunks) > 0:
+                    img_bytes, _ = _normalize_cover_bytes_and_mime(bytes(chunks))
+                    dest_path.write_bytes(img_bytes)
+                    return True
     except Exception as exc:
         logger.warning("Could not download cover image from %s: %s", url, exc)
     return False

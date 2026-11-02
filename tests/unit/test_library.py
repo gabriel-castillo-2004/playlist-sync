@@ -465,3 +465,55 @@ def test_architecture_no_audio_file_deletion() -> None:
     rss_src = (src_dir / "adapters" / "rss_source.py").read_text(encoding="utf-8")
     assert 'resolved_part.name.endswith(".part")' in rss_src
     assert rss_src.count(".unlink(") == 1
+
+
+def test_download_cover_image_rejects_ssrf_urls_and_redirects(
+    tmp_path: Path, monkeypatch: object
+) -> None:
+    """H-03: download_cover_image must reject private/loopback/metadata IPs, redirects to internal IPs, and oversized covers."""
+    import httpx
+
+    from playlist_sync.adapters.library import download_cover_image
+
+    requests_made: list[str] = []
+
+    def transport(req: httpx.Request) -> httpx.Response:
+        requests_made.append(str(req.url))
+        if req.url.path == "/redirect-internal.jpg":
+            return httpx.Response(302, headers={"Location": "http://127.0.0.1/secret.jpg"})
+        if req.url.path == "/oversized.jpg":
+            return httpx.Response(
+                200,
+                content=b"\xff\xd8\xff\xe0" + b"\x00" * 512,
+                headers={"Content-Length": str(20 * 1024 * 1024)},
+            )
+        return httpx.Response(200, content=b"\xff\xd8\xff\xe0" + b"\x00" * 100)
+
+    real_client_cls = httpx.Client
+    monkeypatch.setattr(  # type: ignore[attr-defined]
+        httpx,
+        "Client",
+        lambda *a, **kw: real_client_cls(
+            transport=httpx.MockTransport(transport), follow_redirects=True
+        ),
+    )
+
+    dest = tmp_path / "cover.jpg"
+    for unsafe_url in (
+        "http://127.0.0.1/cover.jpg",
+        "http://192.168.1.1/cover.jpg",
+        "http://169.254.169.254/latest/meta-data/",
+        "file:///etc/passwd",
+        "https://example.com/redirect-internal.jpg",
+        "https://example.com/oversized.jpg",
+    ):
+        assert download_cover_image(unsafe_url, dest) is False
+        assert not dest.exists()
+
+    # None of the internal/loopback URLs may have been requested
+    assert not any(
+        "127.0.0.1" in u or "192.168.1.1" in u or "169.254.169.254" in u for u in requests_made
+    )
+    # Valid public cover should still succeed
+    assert download_cover_image("https://example.com/valid-cover.jpg", dest) is True
+    assert dest.exists()

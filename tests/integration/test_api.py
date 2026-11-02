@@ -238,3 +238,66 @@ def test_rotating_log_creation(tmp_path: Path) -> None:
     assert log_file.exists()
     content = log_file.read_text(encoding="utf-8")
     assert "playlist_sync" in content
+
+
+def test_cors_rejects_external_origin_h10(tmp_path: Path) -> None:
+    """H-10: Requests from an external Origin must not receive permissive Access-Control-Allow-Origin."""
+    db_file = tmp_path / "cors_test.sqlite3"
+    music_root = tmp_path / "music"
+    repo = SQLiteRepo(db_file)
+    fake = FakeSource(title="CORS Playlist")
+
+    app = create_app(
+        repo=repo,
+        source_adapter=fake,
+        music_root=music_root,
+        log_file=str(tmp_path / "test.log"),
+    )
+    app.state.doctor = make_mock_doctor()
+    client = TestClient(app)
+
+    resp = client.get(
+        "/sources",
+        headers={"Origin": "https://sitio-externo.ejemplo"},
+    )
+    assert resp.status_code == 200
+    assert "access-control-allow-origin" not in {k.lower() for k in resp.headers.keys()}
+
+    preflight = client.options(
+        "/sources",
+        headers={
+            "Origin": "https://sitio-externo.ejemplo",
+            "Access-Control-Request-Method": "POST",
+        },
+    )
+    assert "access-control-allow-origin" not in {k.lower() for k in preflight.headers.keys()}
+
+
+def test_error_response_hides_technical_detail_and_logs_it(tmp_path: Path) -> None:
+    """Audit extra (R3): API error JSON must not expose technical_detail to clients; only log it."""
+    db_file = tmp_path / "err_detail.sqlite3"
+    music_root = tmp_path / "music"
+    log_file = tmp_path / "api_error.log"
+    repo = SQLiteRepo(db_file)
+    fake_private = FakeSource(is_private=True)
+
+    app = create_app(
+        repo=repo,
+        source_adapter=fake_private,
+        music_root=music_root,
+        log_file=str(log_file),
+    )
+    app.state.doctor = make_mock_doctor()
+    client = TestClient(app)
+
+    resp = client.post("/sources", json={"url": "https://youtube.com/playlist?list=PLpriv"})
+    assert resp.status_code == 400
+    body = resp.json()
+    payload = body.get("detail", body)
+    assert payload["code"] == "PRIVATE_SOURCE"
+    assert "privada" in payload["user_message"]
+    assert "technical_detail" not in payload
+    assert "Fake private playlist" not in resp.text
+
+    log_content = log_file.read_text(encoding="utf-8")
+    assert "Fake private playlist" in log_content

@@ -170,4 +170,16 @@ Este documento registra las decisiones técnicas tomadas a lo largo del proyecto
 - **Motivo:** Cumplir RF-6, RF-13 y la sección 6.2/9 de `PROMPT_MAESTRO.md` evitando archivos `.m4a`/`.ogg` renombrados como `.mp3`, descargas truncadas y etiquetas `TPE1`/`APIC` inexactas.
 - **Alternativas descartadas:** Guardar bytes crudos sin verificar `Content-Length` o sin transcodificar contenedores no-MP3.
 
+---
+
+## ADR-015: Etapa R3 — Seguridad anti-SSRF con validación DNS y hooks en redirecciones, `defusedxml`, eliminación de CORS y ocultamiento de `technical_detail` (H-03, H-10, Extra)
+- **Fecha:** 2026-11-02
+- **Decisión:**
+  - **H-03:** Implementar el módulo `src/playlist_sync/core/url_security.py` con `validate_external_url`, `resolve_hostname_ips` e `is_ip_global_and_safe`. Se aceptan únicamente los esquemas `http` y `https`, se rechazan dominios `localhost`/`.local` y se bloquean estrictamente direcciones IP privadas, loopback, link-local, multicast, reservadas y no especificadas (incluyendo direcciones IPv4 mapeadas en IPv6 `::ffff:...`), tanto literales como resueltas por DNS (`socket.getaddrinfo`). Además, se registra un hook `event_hooks["request"]` en `httpx.Client` para validar cada redirección HTTP antes de abrir conexión hacia el destino, se imponen límites de 10 MB para feeds XML (`MAX_XML_BYTES`) y portadas (`MAX_COVER_BYTES`) por `Content-Length` y lectura en streaming, y se sustituye `xml.etree.ElementTree.fromstring` por `defusedxml.ElementTree.fromstring(..., forbid_dtd=True, forbid_entities=True, forbid_external=True)` en `RssSource._parse_root`.
+  - **H-10:** Eliminar `CORSMiddleware` en `src/playlist_sync/api/app.py`, dado que la interfaz web se sirve desde el mismo origen (`mount_web_adapter`), impidiendo que sitios web externos en el navegador del usuario invoquen la API local.
+  - **Extra de auditoría:** Omitir `technical_detail` de todas las respuestas HTTP JSON de error en `src/playlist_sync/api/app.py`, `src/playlist_sync/api/routers/sources.py` y `src/playlist_sync/api/routers/sync.py`, registrándolo únicamente en el archivo de log mediante `logger.warning`.
+- **Motivo:** Mitigar vectores SSRF, ataques de expansión de entidades XML (Billion Laughs / XXE), peticiones cross-origin no autorizadas y fuga de detalles internos en respuestas HTTP.
+- **Alternativas descartadas:** Validar solo la URL inicial sin inspeccionar redirecciones HTTP o mantener `xml.etree.ElementTree` estándar.
+
+
 

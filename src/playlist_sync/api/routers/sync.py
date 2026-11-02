@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -12,6 +13,7 @@ from playlist_sync.core.errors import AppError, ErrorCode
 from playlist_sync.services.jobs import JobExecutor
 
 router = APIRouter(tags=["sync"])
+logger = logging.getLogger(__name__)
 
 
 @router.post("/sync-all", response_model=ActionResponse)
@@ -26,12 +28,18 @@ async def sync_all_sources(
             message="Sincronización global iniciada en segundo plano.",
         )
     except AppError as err:
+        if err.technical_detail:
+            logger.warning(
+                "Sync-all conflict [%s]: %s | technical_detail=%s",
+                err.code,
+                err.user_message,
+                err.technical_detail,
+            )
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail={
                 "code": err.code,
                 "user_message": err.user_message,
-                "technical_detail": err.technical_detail,
             },
         ) from err
 
@@ -49,6 +57,13 @@ async def retry_item(
             message="Reintento programado en segundo plano.",
         )
     except AppError as err:
+        if err.technical_detail:
+            logger.warning(
+                "Retry item failed [%s]: %s | technical_detail=%s",
+                err.code,
+                err.user_message,
+                err.technical_detail,
+            )
         code = (
             status.HTTP_404_NOT_FOUND
             if err.code == ErrorCode.SOURCE_NOT_FOUND
@@ -59,6 +74,5 @@ async def retry_item(
             detail={
                 "code": err.code,
                 "user_message": err.user_message,
-                "technical_detail": err.technical_detail,
             },
         ) from err

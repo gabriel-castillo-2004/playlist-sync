@@ -319,3 +319,203 @@ def test_rss_download_resumes_with_range_when_server_supports_206(tmp_path: Path
     assert downloaded.file_path.read_bytes() == full_audio
     assert calls == [None, f"bytes={split_at}-"]
     assert list(dest_dir.glob("*.part")) == []
+
+
+@pytest.mark.parametrize(
+    "unsafe_url",
+    [
+        "http://127.0.0.1/podcast.xml",
+        "http://192.168.1.1/podcast.xml",
+        "http://169.254.169.254/latest/meta-data/",
+        "http://10.0.0.1/podcast.xml",
+        "http://[::1]/podcast.xml",
+        "http://0.0.0.0/podcast.xml",
+        "http://localhost:8080/podcast.xml",
+        "file:///etc/passwd",
+        "ftp://example.com/podcast.xml",
+    ],
+)
+def test_rss_ssrf_rejects_private_loopback_and_metadata_urls(unsafe_url: str) -> None:
+    """H-03: RssSource must reject private, loopback, link-local, unspecified IPs and invalid schemes."""
+    called = False
+
+    def transport(req: httpx.Request) -> httpx.Response:
+        nonlocal called
+        called = True
+        return httpx.Response(200, content=b"<rss><channel><title>Leak</title></channel></rss>")
+
+    client = httpx.Client(transport=httpx.MockTransport(transport))
+    source = RssSource(client=client)
+
+    with pytest.raises(AppError) as exc:
+        source.inspect(unsafe_url)
+    assert exc.value.code == ErrorCode.INVALID_URL
+    assert not called
+
+
+def test_rss_ssrf_rejects_redirect_to_internal_ip(tmp_path: Path) -> None:
+    """H-03: HTTP redirect from a public URL to an internal IP must be blocked before fetching target."""
+    internal_hit = False
+
+    def transport(req: httpx.Request) -> httpx.Response:
+        nonlocal internal_hit
+        if req.url.host in ("127.0.0.1", "169.254.169.254", "192.168.1.1"):
+            internal_hit = True
+            return httpx.Response(
+                200, content=b"<rss><channel><title>Internal</title></channel></rss>"
+            )
+        return httpx.Response(
+            302,
+            headers={"Location": "http://169.254.169.254/latest/meta-data/"},
+        )
+
+    client = httpx.Client(transport=httpx.MockTransport(transport), follow_redirects=True)
+    source = RssSource(client=client)
+
+    with pytest.raises(AppError) as exc:
+        source.inspect("https://example.com/redirect-feed.xml")
+    assert exc.value.code == ErrorCode.INVALID_URL
+    assert not internal_hit
+
+    item = RemoteItem(
+        external_id="ep_redir",
+        title="Redirect Ep",
+        position=1,
+        url="https://example.com/redirect-audio.mp3",
+    )
+    with pytest.raises(AppError) as exc_dl:
+        source.download(item, tmp_path / "redir_out")
+    assert exc_dl.value.code == ErrorCode.INVALID_URL
+    assert not internal_hit
+
+
+@pytest.mark.parametrize(
+    "unsafe_enclosure_url",
+    [
+        "file:///etc/passwd",
+        "http://127.0.0.1/audio.mp3",
+        "http://192.168.1.1/audio.mp3",
+        "http://169.254.169.254/latest/meta-data/",
+    ],
+)
+def test_rss_download_rejects_unsafe_enclosure_urls(
+    tmp_path: Path, unsafe_enclosure_url: str
+) -> None:
+    """H-03: RssSource.download must validate scheme and SSRF safety of enclosure URLs."""
+    called = False
+
+    def transport(req: httpx.Request) -> httpx.Response:
+        nonlocal called
+        called = True
+        return httpx.Response(200, content=b"ID3" + b"\x00" * 100)
+
+    client = httpx.Client(transport=httpx.MockTransport(transport))
+    source = RssSource(client=client)
+
+    item = RemoteItem(
+        external_id="ep_unsafe",
+        title="Unsafe Ep",
+        position=1,
+        url=unsafe_enclosure_url,
+    )
+    with pytest.raises(AppError) as exc:
+        source.download(item, tmp_path / "unsafe_out")
+    assert exc.value.code == ErrorCode.INVALID_URL
+    assert not called
+
+
+def test_rss_rejects_xml_with_nested_entities() -> None:
+    """H-03: XML feeds containing DOCTYPE / nested entity expansion must be rejected via defusedxml."""
+    xml_bomb = b"""<?xml version="1.0"?>
+<!DOCTYPE lolz [
+ <!ENTITY lol "lol">
+ <!ENTITY lol1 "&lol;&lol;&lol;&lol;&lol;&lol;&lol;&lol;&lol;&lol;">
+ <!ENTITY lol2 "&lol1;&lol1;&lol1;&lol1;&lol1;&lol1;&lol1;&lol1;&lol1;&lol1;">
+]>
+<rss version="2.0">
+  <channel>
+    <title>&lol2;</title>
+  </channel>
+</rss>"""
+
+    def transport(req: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, content=xml_bomb)
+
+    client = httpx.Client(transport=httpx.MockTransport(transport))
+    source = RssSource(client=client)
+
+    with pytest.raises(AppError) as exc:
+        source.inspect("https://example.com/bomb.xml")
+    assert exc.value.code == ErrorCode.INVALID_URL
+
+
+def test_rss_ssrf_rejects_hostname_resolving_to_private_ip(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """H-03: If DNS resolution of a hostname yields a private/loopback/reserved IP, reject it."""
+    import socket
+
+    def fake_getaddrinfo(
+        host: str, port: object, *args: object, **kwargs: object
+    ) -> list[tuple[object, ...]]:
+        return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("192.168.10.25", 443))]
+
+    monkeypatch.setattr(socket, "getaddrinfo", fake_getaddrinfo)
+
+    def transport(req: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, content=b"<rss><channel><title>Internal</title></channel></rss>")
+
+    client = httpx.Client(transport=httpx.MockTransport(transport))
+    source = RssSource(client=client)
+
+    with pytest.raises(AppError) as exc:
+        source.inspect("https://internal.corp.example/feed.xml")
+    assert exc.value.code == ErrorCode.INVALID_URL
+
+
+def test_rss_rejects_oversized_xml_response() -> None:
+    """H-03: RSS XML feed exceeding the size limit (10 MB) must be rejected."""
+    oversized_bytes = b"<rss>" + (b"A" * (10 * 1024 * 1024 + 1024)) + b"</rss>"
+
+    def transport(req: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            content=oversized_bytes,
+            headers={"Content-Length": str(len(oversized_bytes))},
+        )
+
+    client = httpx.Client(transport=httpx.MockTransport(transport))
+    source = RssSource(client=client)
+
+    with pytest.raises(AppError) as exc:
+        source.inspect("https://example.com/giant.xml")
+    assert exc.value.code == ErrorCode.INVALID_URL
+
+
+def test_url_security_edge_cases(monkeypatch: pytest.MonkeyPatch) -> None:
+    """H-03: Verify IPv4-mapped IPv6, multicast, reserved, missing host, and DNS failure branches."""
+    import socket
+
+    from playlist_sync.core.url_security import is_ip_global_and_safe, validate_external_url
+
+    assert is_ip_global_and_safe("not-an-ip") is False
+    assert is_ip_global_and_safe("::ffff:127.0.0.1") is False
+    assert is_ip_global_and_safe("224.0.0.1") is False
+    assert is_ip_global_and_safe("240.0.0.1") is False
+    assert is_ip_global_and_safe("93.184.216.34") is True
+
+    with pytest.raises(AppError) as exc_host:
+        validate_external_url("http:///no-host")
+    assert exc_host.value.code == ErrorCode.INVALID_URL
+
+    with pytest.raises(AppError) as exc_empty:
+        validate_external_url("https://custom.domain/feed.xml", resolver=lambda _: [])
+    assert exc_empty.value.code == ErrorCode.INVALID_URL
+
+    def broken_dns(*args: object, **kwargs: object) -> list[tuple[object, ...]]:
+        raise socket.gaierror("DNS unreachable")
+
+    monkeypatch.setattr(socket, "getaddrinfo", broken_dns)
+    with pytest.raises(AppError) as exc_dns:
+        validate_external_url("https://unresolvable.domain.invalid/feed.xml")
+    assert exc_dns.value.code == ErrorCode.NETWORK

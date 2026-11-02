@@ -18,6 +18,8 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 import httpx
+from defusedxml import ElementTree as DefusedET
+from defusedxml.common import DefusedXmlException
 
 from playlist_sync.adapters.repo import sanitize_filename
 from playlist_sync.adapters.ytdlp_source import find_ffmpeg_location
@@ -31,6 +33,7 @@ from playlist_sync.core.models import (
     SourceKind,
     SourceRecord,
 )
+from playlist_sync.core.url_security import MAX_XML_BYTES, validate_external_url
 
 logger = logging.getLogger(__name__)
 
@@ -206,46 +209,85 @@ def _convert_part_to_mp3(source_part: Path, target_part: Path) -> None:
         )
 
 
+def _validate_httpx_request(request: httpx.Request) -> None:
+    """Validate every outgoing HTTP request and redirect target against SSRF (H-03)."""
+    validate_external_url(str(request.url))
+
+
+def _ensure_ssrf_hook(client: httpx.Client) -> httpx.Client:
+    """Ensure the SSRF request validation hook is attached to an httpx.Client."""
+    req_hooks = client.event_hooks.setdefault("request", [])
+    if _validate_httpx_request not in req_hooks:
+        req_hooks.append(_validate_httpx_request)
+    return client
+
+
 class RssSource(Source):
     """Direct RSS podcast parser and audio downloader (RF-13)."""
 
-    def __init__(self, client: httpx.Client | None = None, timeout: float = 20.0) -> None:
-        self._custom_client = client
+    def __init__(
+        self,
+        client: httpx.Client | None = None,
+        timeout: float = 20.0,
+        max_xml_bytes: int = MAX_XML_BYTES,
+    ) -> None:
+        self._custom_client = _ensure_ssrf_hook(client) if client is not None else None
         self.timeout = timeout
+        self.max_xml_bytes = max_xml_bytes
 
     def _fetch_xml(self, url: str) -> bytes:
-        """Fetch XML content via HTTP with strict error classification."""
-        parsed = urlparse(url)
-        if parsed.scheme not in ("http", "https"):
-            raise AppError(
-                ErrorCode.INVALID_URL,
-                user_message="Ese link no parece de YouTube ni de un podcast.",
-                technical_detail=f"Invalid scheme for RSS feed: {parsed.scheme}",
-            )
+        """Fetch XML content via HTTP with strict SSRF validation, size cap, and error classification."""
+        validated_url = validate_external_url(url)
 
-        client = self._custom_client or httpx.Client(
-            timeout=self.timeout,
-            follow_redirects=True,
-            headers={"User-Agent": "PlaylistSync/0.1.0 (Podcast Downloader)"},
+        client = self._custom_client or _ensure_ssrf_hook(
+            httpx.Client(
+                timeout=self.timeout,
+                follow_redirects=True,
+                headers={"User-Agent": "PlaylistSync/0.1.0 (Podcast Downloader)"},
+            )
         )
         owns_client = self._custom_client is None
 
         try:
-            resp = client.get(url)
-            if resp.status_code == 404:
-                raise AppError(
-                    ErrorCode.SOURCE_NOT_FOUND,
-                    user_message="No encontré esa playlist o podcast. Revisa que el link esté completo.",
-                    technical_detail=f"HTTP 404 for {url}",
-                )
-            if resp.status_code == 403:
-                raise AppError(
-                    ErrorCode.PRIVATE_SOURCE,
-                    user_message="Este feed es privado o requiere autenticación.",
-                    technical_detail=f"HTTP 403 for {url}",
-                )
-            resp.raise_for_status()
-            return resp.content
+            with client.stream("GET", validated_url) as resp:
+                if resp.status_code == 404:
+                    raise AppError(
+                        ErrorCode.SOURCE_NOT_FOUND,
+                        user_message="No encontré esa playlist o podcast. Revisa que el link esté completo.",
+                        technical_detail=f"HTTP 404 for {validated_url}",
+                    )
+                if resp.status_code == 403:
+                    raise AppError(
+                        ErrorCode.PRIVATE_SOURCE,
+                        user_message="Este feed es privado o requiere autenticación.",
+                        technical_detail=f"HTTP 403 for {validated_url}",
+                    )
+                resp.raise_for_status()
+
+                cl_header = resp.headers.get("content-length")
+                if cl_header and cl_header.isdigit() and int(cl_header) > self.max_xml_bytes:
+                    raise AppError(
+                        ErrorCode.INVALID_URL,
+                        user_message="El archivo del feed RSS excede el tamaño máximo permitido.",
+                        technical_detail=(
+                            f"RSS XML Content-Length {cl_header} exceeds limit {self.max_xml_bytes}"
+                        ),
+                    )
+
+                chunks = bytearray()
+                for chunk in resp.iter_bytes(chunk_size=65536):
+                    if not chunk:
+                        continue
+                    chunks.extend(chunk)
+                    if len(chunks) > self.max_xml_bytes:
+                        raise AppError(
+                            ErrorCode.INVALID_URL,
+                            user_message="El archivo del feed RSS excede el tamaño máximo permitido.",
+                            technical_detail=(
+                                f"RSS XML payload exceeded max size of {self.max_xml_bytes} bytes"
+                            ),
+                        )
+                return bytes(chunks)
         except (httpx.ConnectError, httpx.TimeoutException, httpx.NetworkError) as exc:
             raise AppError(
                 ErrorCode.NETWORK,
@@ -264,14 +306,20 @@ class RssSource(Source):
                 client.close()
 
     def _parse_root(self, xml_bytes: bytes) -> ET.Element:
-        """Parse raw XML bytes safely into an ElementTree root."""
+        """Parse raw XML bytes safely into an ElementTree root using defusedxml (H-03)."""
         try:
-            return ET.fromstring(xml_bytes)
-        except ET.ParseError as exc:
+            root: ET.Element = DefusedET.fromstring(
+                xml_bytes,
+                forbid_dtd=True,
+                forbid_entities=True,
+                forbid_external=True,
+            )
+            return root
+        except (ET.ParseError, DefusedXmlException) as exc:
             raise AppError(
                 ErrorCode.INVALID_URL,
                 user_message="Ese link no parece de YouTube ni de un podcast válido.",
-                technical_detail=f"XML ParseError: {exc}",
+                technical_detail=f"Safe XML parse error: {exc}",
             ) from exc
 
     def inspect(self, url: str) -> SourceInfo:
@@ -402,10 +450,14 @@ class RssSource(Source):
                 duration_seconds=item.duration_seconds,
             )
 
-        client = self._custom_client or httpx.Client(
-            timeout=self.timeout,
-            follow_redirects=True,
-            headers={"User-Agent": "PlaylistSync/0.1.0 (Podcast Downloader)"},
+        validated_enclosure_url = validate_external_url(item.url)
+
+        client = self._custom_client or _ensure_ssrf_hook(
+            httpx.Client(
+                timeout=self.timeout,
+                follow_redirects=True,
+                headers={"User-Agent": "PlaylistSync/0.1.0 (Podcast Downloader)"},
+            )
         )
         owns_client = self._custom_client is None
 
@@ -420,7 +472,7 @@ class RssSource(Source):
                     req_headers["Range"] = f"bytes={offset}-"
 
                 supports_range = False
-                with client.stream("GET", item.url, headers=req_headers) as resp:
+                with client.stream("GET", validated_enclosure_url, headers=req_headers) as resp:
                     if resp.status_code == 404:
                         raise AppError(
                             ErrorCode.ITEM_UNAVAILABLE,

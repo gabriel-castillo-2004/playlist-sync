@@ -8,7 +8,6 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI, Request, status
-from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from playlist_sync.adapters.composite_source import CompositeSource
@@ -78,15 +77,6 @@ def create_app(
         lifespan=app_lifespan,
     )
 
-    # CORS for local web UI
-    app.add_middleware(
-        CORSMiddleware,
-        allow_origins=["*"],
-        allow_credentials=True,
-        allow_methods=["*"],
-        allow_headers=["*"],
-    )
-
     # Store state on application instance
     app.state.repo = resolved_repo
     app.state.source_adapter = resolved_source
@@ -100,6 +90,13 @@ def create_app(
     # Global AppError exception handler
     @app.exception_handler(AppError)
     async def app_error_handler(_: Request, exc: AppError) -> JSONResponse:
+        if exc.technical_detail:
+            logger.warning(
+                "API AppError [%s]: %s | technical_detail=%s",
+                exc.code,
+                exc.user_message,
+                exc.technical_detail,
+            )
         status_map = {
             ErrorCode.SOURCE_NOT_FOUND: status.HTTP_404_NOT_FOUND,
             ErrorCode.INVALID_URL: status.HTTP_400_BAD_REQUEST,
@@ -110,8 +107,7 @@ def create_app(
         error_body = ErrorResponse(
             code=exc.code,
             user_message=exc.user_message,
-            technical_detail=exc.technical_detail,
-        ).model_dump()
+        ).model_dump(exclude_none=True)
         return JSONResponse(status_code=http_status, content=error_body)
 
     # Register routers

@@ -40,7 +40,7 @@ class FakeSource:
         if not (url.startswith("http://") or url.startswith("https://")):
             raise AppError(ErrorCode.INVALID_URL, f"Invalid URL scheme: {url}")
         if self.is_private:
-            raise AppError(ErrorCode.PRIVATE_SOURCE)
+            raise AppError(ErrorCode.PRIVATE_SOURCE, technical_detail="Fake private playlist")
         return SourceInfo(
             url=url,
             kind=SourceKind.YT_PLAYLIST,
@@ -51,7 +51,7 @@ class FakeSource:
 
     def list_items(self, source: SourceRecord) -> list[RemoteItem]:
         if self.is_private:
-            raise AppError(ErrorCode.PRIVATE_SOURCE)
+            raise AppError(ErrorCode.PRIVATE_SOURCE, technical_detail="Fake private playlist")
         return list(self.items)
 
     def download(

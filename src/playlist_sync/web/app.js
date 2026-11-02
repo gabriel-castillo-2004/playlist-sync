@@ -60,10 +60,11 @@
       const data = await response.json().catch(() => null);
 
       if (!response.ok) {
-        const error = new Error(data?.detail?.user_message || data?.message || 'Error en la petición');
+        const error = new Error(
+          data?.detail?.user_message || data?.user_message || data?.message || 'Error en la petición'
+        );
         error.status = response.status;
-        error.code = data?.detail?.code;
-        error.technical = data?.detail?.technical_detail;
+        error.code = data?.detail?.code || data?.code;
         throw error;
       }
 

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -21,6 +22,7 @@ from playlist_sync.services.jobs import JobExecutor
 from playlist_sync.services.sync import add_source_service
 
 router = APIRouter(prefix="/sources", tags=["sources"])
+logger = logging.getLogger(__name__)
 
 
 def _source_to_response(repo: SQLiteRepo, src: SourceRecord) -> SourceResponse:
@@ -55,23 +57,8 @@ def create_source(
     source_adapter: Annotated[Source, Depends(get_source_adapter)],
 ) -> SourceResponse:
     """Register a new source URL."""
-    try:
-        source = add_source_service(repo, source_adapter, payload.url)
-        return _source_to_response(repo, source)
-    except AppError as err:
-        status_code = status.HTTP_400_BAD_REQUEST
-        if err.code in (ErrorCode.PRIVATE_SOURCE, ErrorCode.INVALID_URL):
-            status_code = status.HTTP_400_BAD_REQUEST
-        elif err.code == ErrorCode.SOURCE_NOT_FOUND:
-            status_code = status.HTTP_404_NOT_FOUND
-        raise HTTPException(
-            status_code=status_code,
-            detail={
-                "code": err.code,
-                "user_message": err.user_message,
-                "technical_detail": err.technical_detail,
-            },
-        ) from err
+    source = add_source_service(repo, source_adapter, payload.url)
+    return _source_to_response(repo, source)
 
 
 @router.get("", response_model=list[SourceResponse])
@@ -89,12 +76,12 @@ def get_source_detail(
     """Retrieve details and track list for a specific source."""
     source = repo.get_source(source_id)
     if not source:
+        logger.warning("Source %d not found", source_id)
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail={
                 "code": ErrorCode.SOURCE_NOT_FOUND,
                 "user_message": "No se encontró la fuente solicitada.",
-                "technical_detail": f"Source {source_id} not found",
             },
         )
 
@@ -134,12 +121,12 @@ async def sync_source(
     """Trigger background synchronization for a specific source."""
     source = repo.get_source(source_id)
     if not source:
+        logger.warning("Source %d not found", source_id)
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail={
                 "code": ErrorCode.SOURCE_NOT_FOUND,
                 "user_message": "No se encontró la fuente solicitada.",
-                "technical_detail": f"Source {source_id} not found",
             },
         )
 
@@ -152,11 +139,17 @@ async def sync_source(
         )
     except AppError as err:
         # Mutex lock conflict RF-11
+        if err.technical_detail:
+            logger.warning(
+                "Sync trigger conflict [%s]: %s | technical_detail=%s",
+                err.code,
+                err.user_message,
+                err.technical_detail,
+            )
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail={
                 "code": err.code,
                 "user_message": err.user_message,
-                "technical_detail": err.technical_detail,
             },
         ) from err
