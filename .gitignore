@@ -1,31 +1,100 @@
-# Python
+# =============================================================================
+# 1. Multimedia, Descargas de yt-dlp y Archivos con Copyright
+# =============================================================================
+music_root/
+descargas/
+downloads/
+
+# Audio y contenedores temporales de descarga
+*.mp3
+*.m4a
+*.ogg
+*.opus
+*.aac
+*.wav
+*.flac
+*.webm
+*.mp4
+*.mkv
+*.part
+*.ytdl
+
+# Carátulas e imágenes descargadas
+*.jpg
+*.jpeg
+*.webp
+*.png
+
+# Listas de reproducción generadas
+*.m3u
+*.m3u8
+
+# Excepciones explícitas para iconos de la PWA y fixtures sintéticos de pruebas
+!src/playlist_sync/web/icons/*.png
+!src/playlist_sync/web/icons/*.svg
+!tests/fixtures/**
+
+# =============================================================================
+# 2. Entorno Python, Empaquetado y Cachés de Calidad/Pruebas
+# =============================================================================
 .venv/
 venv/
+env/
 __pycache__/
 *.py[cod]
 *$py.class
 *.egg-info/
+.eggs/
 dist/
 build/
 
-# Testing & Quality
+# Pytest, Cobertura, Ruff y Mypy
 .pytest_cache/
 .coverage
+.coverage.*
+coverage.xml
 htmlcov/
 .ruff_cache/
 .mypy_cache/
 
-# Databases
-*.sqlite3
-*.sqlite3-journal
+# =============================================================================
+# 3. Bases de Datos Locales, Respaldos, Migraciones y Logs
+# =============================================================================
 *.db
 *.db-journal
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite-journal
+*.sqlite-shm
+*.sqlite-wal
+*.sqlite3
+*.sqlite3-journal
+*.sqlite3-shm
+*.sqlite3-wal
 
-# Music destination folder and logs
-music_root/
+# Carpeta de respaldos automáticos SQLite y exportaciones locales
+backups/
+sources.json
+
+# Registros rotativos (RotatingFileHandler: .log, .log.1, .log.2, .log.3)
 *.log
+*.log.*
 logs/
 
-# Local overrides (optional)
+# Configuración local personalizada opcional
 config.local.toml
 
+# =============================================================================
+# 4. Archivos de Sistema Operativo (Linux / Windows / macOS) y Editores
+# =============================================================================
+.DS_Store
+.AppleDouble
+.LSOverride
+Thumbs.db
+Thumbs.db:encryptable
+ehthumbs.db
+Desktop.ini
+*~
+.directory
+.Trash-*
