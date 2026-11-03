@@ -13,6 +13,17 @@ def test_sanitize_filename() -> None:
     assert sanitize_filename("Song Name 😔👍") == "Song Name 😔👍"
 
 
+def test_sanitize_filename_windows_reserved_names_h20() -> None:
+    """H-20: Windows reserved device names (CON, NUL, AUX, PRN, COM1-9, LPT1-9) must be prefixed."""
+    assert sanitize_filename("CON") == "_CON"
+    assert sanitize_filename("nul.txt") == "_nul.txt"
+    assert sanitize_filename("aux") == "_aux"
+    assert sanitize_filename("PRN") == "_PRN"
+    assert sanitize_filename("COM1") == "_COM1"
+    assert sanitize_filename("lpt9.mp3") == "_lpt9.mp3"
+    assert sanitize_filename("Console") == "Console"
+
+
 def test_repo_init_and_source_crud(tmp_path: Path) -> None:
     db_file = tmp_path / "test.db"
     repo = SQLiteRepo(db_file)

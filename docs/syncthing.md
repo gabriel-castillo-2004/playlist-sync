@@ -14,7 +14,8 @@ Esta guía explica paso a paso cómo sincronizar la música y podcasts descargad
 ## 2. Aplicación recomendada para Android
 > [!IMPORTANT]
 > La aplicación oficial original de Syncthing en Google Play fue archivada.
-> La versión recomendada y activamente mantenida es **Syncthing-Fork** (creada por Catfriend1), disponible en:
+> La versión recomendada y activamente mantenida es **Syncthing-Fork** (iniciada por Catfriend1 y mantenida actualmente por la comunidad en [`researchxxl/syncthing-android`](https://github.com/researchxxl/syncthing-android)), disponible en:
+> - **GitHub Releases (oficial mantenido):** [researchxxl/syncthing-android](https://github.com/researchxxl/syncthing-android/releases)
 > - **F-Droid:** [Syncthing-Fork en F-Droid](https://f-droid.org/packages/com.github.catfriend1.syncthingandroid/)
 > - **Google Play Store:** *Syncthing-Fork*
 

@@ -205,6 +205,18 @@ Este documento registra las decisiones técnicas tomadas a lo largo del proyecto
 - **Motivo:** Erradicar condiciones de carrera al disparar sincronizaciones simultáneas, respetar la semántica de reintentabilidad y backoff frente a bloqueos temporales, y ofrecer retroalimentación veraz y comprensible en la interfaz web.
 - **Alternativas descartadas:** Adquirir el candado dentro de la tarea creada por `asyncio.create_task` (vulnerable a TOCTOU) o reintentar indefinidamente errores permanentes como `AGE_RESTRICTED` y `GEO_BLOCKED`.
 
+---
+
+## ADR-018: Etapa R6 — Fijación de dependencias, pruebas E2E (`tests/e2e/test_ui_playwright.py`), higiene de portabilidad/UI y cierre de auditoría (H-18, H-19, H-20)
+- **Fecha:** 2026-11-02
+- **Decisión:**
+  - **H-18:** Retirar `feedparser` de `pyproject.toml` (dado que `RssSource` procesa los feeds RSS/Atom de forma segura mediante `defusedxml`), acotar rangos de versión mayor (`<1.0.0`, `<2.0.0`, `<3.0.0`) en `pyproject.toml` y congelar las versiones exactas probadas en `requirements.txt`.
+  - **H-19:** Incorporar `tests/e2e/test_ui_playwright.py` cubriendo el flujo E2E completo con `FakeSource` (alta → sincronización → verificación de MP3, etiquetas ID3v2.3 y `.m3u8` relativo → segunda corrida idempotente → reconciliación `RF-20`) y la validación de integridad de la interfaz web y sintaxis JS con `node --check`. Actualizar `docs/manual-checks.md`, `docs/syncthing.md` (`researchxxl/syncthing-android`) y `README.md` (documentando `reconcile`, `restore-backup` y la exposición en red local `0.0.0.0` con su advertencia de red doméstica sin autenticación).
+  - **H-20:** Cargar `config.toml` en `main.py` antes de invocar `run_doctor(target_dir=music_root, min_mb=min_disk_free_mb)`; prefijar con `_` los nombres de dispositivo reservados de Windows (`CON`, `PRN`, `AUX`, `NUL`, `COM1`–`COM9`, `LPT1`–`LPT9`) en `sanitize_filename`; eliminar el archivo duplicado `src/playlist_sync/web/style.css` (manteniendo el alias HTTP `/style.css` en `adapters/web.py`); y convertir `#system-health-pill` en `<button type="button">` accesible por teclado. Asimismo, se deja constancia formal de los tres módulos auxiliares fuera del diagrama 5.3 original: `adapters/composite_source.py` (enrutador `Source` entre `YtDlpSource`, `RssSource` y búsqueda iTunes), `adapters/web.py` (montaje de archivos estáticos y endpoint `/covers/{id}`) y `logging_config.py` (configuración centralizada de `RotatingFileHandler`).
+- **Motivo:** Completar la higiene técnica, la reproducibilidad de dependencias y las pruebas E2E de cierre de la auditoría.
+- **Alternativas descartadas:** Conservar archivos CSS duplicados o ejecutar `doctor` con rutas estáticas ignorando `config.toml`.
+
+
 
 
 

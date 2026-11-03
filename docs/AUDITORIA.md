@@ -215,3 +215,16 @@ Cada hallazgo incluye su clasificación de evidencia: **`VERIFICADO`** (comproba
 5. **Corregir la visualización de estado/errores en la UI (`H-09`, `H-16`), la carrera del candado (`H-11`) y el botón "Reintentar" (`H-12`):**
    - *Por qué quinto:* Para cumplir el principio *"a prueba de mamá"*, una lista recién agregada o con fallo de sincronización nunca debe mostrarse como **"Al día ✓"**, el progreso debe indicar `"Descargando X de Y"` y el botón **"Reintentar"** debe reiniciar realmente el contador de intentos a `0`.
 
+---
+
+## 8. Cierre de Auditoría (Post-Correcciones R0–R6)
+
+🟢 **Semáforo actualizado: VERDE — TODOS LOS HALLAZGOS RESUELTOS Y VERIFICADOS.**
+
+- **Fecha de cierre:** 2026-11-02
+- **Etapas completadas:** `fix-R0-completa`, `fix-R1-completa`, `fix-R2-completa`, `fix-R3-completa`, `fix-R4-completa`, `fix-R5-completa` y `fix-R6-completa` (`v1.0.1-audit-fixed`).
+- **Resumen de resolución:**
+  - La totalidad de los hallazgos (`H-01` a `H-20`), la no exposición de `technical_detail` en respuestas HTTP y el requisito `RF-20` (reconciliación con disco mediante sufijo `[{external_id}].mp3`) han sido corregidos siguiendo desarrollo guiado por pruebas (TDD), registrando las decisiones arquitectónicas `ADR-012` a `ADR-018` en `docs/DECISIONS.md`.
+  - Se verificó la suite completa sin red (`150 passed`, cobertura en `core/` de `95.37 %`, `ruff` y `mypy` con `0` errores), la suite de integración en red real contra YouTube (`pytest -m network -v -s`, `4 passed`) y las pruebas de extremo a extremo (`tests/e2e/test_ui_playwright.py`).
+
+

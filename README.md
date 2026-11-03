@@ -87,10 +87,17 @@ Para iniciar Playlist Sync al encender tu PC en Windows:
 
 ## 📱 Interfaz Web "A prueba de mamá"
 
-Abre en tu navegador (o celular en la misma red Wi-Fi):
+Abre en tu navegador local:
 ```
 http://localhost:8000
 ```
+
+### Acceso desde el celular u otros equipos en la red local (LAN / Wi-Fi)
+Por defecto, el servidor escucha únicamente en `127.0.0.1` (acceso exclusivo desde la misma PC). Para abrir la interfaz desde tu celular en la misma red Wi-Fi:
+1. En `config.toml`, cambia `host = "127.0.0.1"` por `host = "0.0.0.0"` (o inicia el servidor con `python -m playlist_sync serve --host 0.0.0.0 --port 8000`).
+2. Consulta la IP local de tu PC (ej. `ip -4 addr` en Linux o `ipconfig` en Windows) y abre en el navegador del celular `http://<IP-DE-TU-PC>:8000` (por ejemplo, `http://192.168.1.50:8000`).
+
+> **⚠️ Advertencia de seguridad en red local:** Playlist Sync está diseñado para operar dentro de una red doméstica de confianza y **no incluye autenticación de usuarios**. Expón `0.0.0.0` únicamente en tu Wi-Fi privado de casa; nunca expongas el puerto `8000` a internet público ni en redes Wi-Fi abiertas.
 
 Características principales:
 - **Pantalla única:** Diseñada para usarse con una sola mano en pantallas móviles (mínimo 360 px).
@@ -131,7 +138,7 @@ Para mover tus listas a una computadora nueva sin transferir bases de datos SQLi
 Playlist Sync organiza la música descargada en carpetas locales con carátulas `cover.jpg` y playlists relativas `.m3u8`.
 
 Para transferir los archivos automáticamente a tu celular:
-1. Consulta la guía detallada e ilustrada en: [`docs/syncthing.md`](file:///c:/Users/Angel%20laptopJaz/playlist-sync/docs/syncthing.md).
+1. Consulta la guía detallada e ilustrada en: [`docs/syncthing.md`](docs/syncthing.md).
 2. **Regla de oro:**
    - Carpeta en la PC: **"Solo enviar"** (*Send Only*).
    - Carpeta en el celular: **"Solo recibir"** (*Receive Only*).
@@ -166,6 +173,12 @@ python -m playlist_sync import [archivo.json]
 
 # Crear un respaldo consistente de la base de datos
 python -m playlist_sync backup [--dir backups]
+
+# Restaurar la base de datos desde un respaldo previo (H-02)
+python -m playlist_sync restore-backup backups/playlist_sync_backup_YYYYMMDD_HHMMSS_ffffff.sqlite3
+
+# Reconciliar el estado de la base de datos con los archivos MP3 ya existentes en disco (RF-20)
+python -m playlist_sync reconcile [all | <id_fuente>]
 ```
 
 ---
@@ -208,8 +221,11 @@ database_path = "playlist_sync.sqlite3"
 min_disk_free_mb = 1024
 
 [sync]
-interval_hours = 6     # Revisión automática cada N horas (0 = desactivado)
-max_retries = 3        # Reintentos por canción fallida
-safety_threshold = 0.50 # Protección contra encogimiento repentino de playlists
-concurrency = 1        # Descargas secuenciales para cuidar hardware modesto
+interval_hours = 6             # Revisión automática cada N horas (0 = desactivado)
+max_retries = 3                # Reintentos por canción fallida
+safety_threshold = 0.50        # Protección contra encogimiento repentino de playlists
+concurrency = 1                # Descargas secuenciales para cuidar hardware modesto
+sleep_interval = 2.0           # Pausa en segundos entre descargas de canciones (H-17)
+sleep_interval_requests = 1.0  # Pausa en segundos entre peticiones de metadatos a YouTube
+rate_limit_bytes = 0           # Límite de velocidad en bytes/s (0 = sin límite)
 ```

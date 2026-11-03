@@ -65,10 +65,21 @@ CREATE TABLE IF NOT EXISTS settings (
 """
 
 
+_WINDOWS_RESERVED_STEMS = {
+    "CON",
+    "PRN",
+    "AUX",
+    "NUL",
+    *(f"COM{i}" for i in range(1, 10)),
+    *(f"LPT{i}" for i in range(1, 10)),
+}
+
+
 def sanitize_filename(name: str, max_length: int = 120) -> str:
     """Sanitize directory or file name across Windows and Linux.
 
-    Strips reserved characters (<>:"/\\|?*), control chars, and trailing dots/spaces.
+    Strips reserved characters (<>:"/\\|?*), control chars, trailing dots/spaces,
+    and prefixes Windows reserved device names (CON, NUL, AUX, PRN, COM1-9, LPT1-9).
     """
     # Replace illegal filesystem characters with space
     cleaned = re.sub(r'[<>:"/\\|?*\x00-\x1f]', " ", name)
@@ -76,6 +87,11 @@ def sanitize_filename(name: str, max_length: int = 120) -> str:
     cleaned = re.sub(r"\s+", " ", cleaned).strip(". ")
     if not cleaned:
         cleaned = "untitled"
+
+    stem = cleaned.split(".", 1)[0].strip().upper()
+    if stem in _WINDOWS_RESERVED_STEMS:
+        cleaned = f"_{cleaned}"
+
     return cleaned[:max_length].rstrip(". ")
 
 

@@ -366,10 +366,6 @@ def main() -> None:
         parser.print_help()
         sys.exit(0)
 
-    if args.subcommand == "doctor":
-        success = run_doctor()
-        sys.exit(0 if success else 1)
-
     cfg = load_config()
     raw_storage = cfg.get("storage")
     storage_cfg: dict[str, object] = raw_storage if isinstance(raw_storage, dict) else {}
@@ -386,6 +382,13 @@ def main() -> None:
     sleep_interval_requests = float(str(sync_cfg.get("sleep_interval_requests", 1.0)))
     raw_rate_limit = int(str(sync_cfg.get("rate_limit_bytes", 0)))
     rate_limit_bytes = raw_rate_limit if raw_rate_limit > 0 else None
+
+    if args.subcommand == "doctor":
+        try:
+            success = run_doctor(target_dir=music_root, min_mb=min_disk_free_mb)
+        except TypeError:
+            success = run_doctor()
+        sys.exit(0 if success else 1)
 
     repo = SQLiteRepo(db_path)
     source_adapter = CompositeSource(

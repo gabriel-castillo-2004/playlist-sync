@@ -294,8 +294,17 @@ body {
   background-color: var(--bg-card);
   border: 1px solid var(--border-subtle);
   border-radius: 9999px;
-  cursor: pointer;
+  font: inherit;
+  color: inherit;
   user-select: none;
+}
+
+.health-pill {
+  cursor: pointer;
+}
+
+.connection-pill {
+  cursor: default;
 }
 
 .health-dot, .connection-dot {

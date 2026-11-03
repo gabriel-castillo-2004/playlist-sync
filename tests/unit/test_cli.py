@@ -158,3 +158,37 @@ def test_install_ps1_separates_py_command_and_args_h04() -> None:
     assert '$pythonExe = "py"' in ps1_text
     assert '@("-3.12")' in ps1_text
     assert "& $pythonExe @pythonArgs -m venv .venv" in ps1_text
+
+
+def test_cli_doctor_loads_config_toml_h20(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """H-20: CLI 'doctor' must load config.toml before invoking run_doctor."""
+    import playlist_sync.main as main_mod
+
+    custom_music = tmp_path / "custom_music_dir"
+    monkeypatch.setattr(
+        main_mod,
+        "load_config",
+        lambda *_args, **_kwargs: {
+            "storage": {
+                "music_root": str(custom_music),
+                "min_disk_free_mb": 2048,
+            }
+        },
+    )
+
+    captured: dict[str, object] = {}
+
+    def fake_run_doctor(target_dir: Path | None = None, min_mb: int = 1024) -> bool:
+        captured["target_dir"] = target_dir
+        captured["min_mb"] = min_mb
+        return True
+
+    monkeypatch.setattr(main_mod, "run_doctor", fake_run_doctor)
+    monkeypatch.setattr("sys.argv", ["playlist-sync", "doctor"])
+
+    with pytest.raises(SystemExit) as exc_info:
+        main_mod.main()
+
+    assert exc_info.value.code == 0
+    assert captured.get("target_dir") == custom_music
+    assert captured.get("min_mb") == 2048

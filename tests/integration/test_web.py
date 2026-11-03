@@ -140,3 +140,19 @@ def test_cover_endpoint_behavior(tmp_path: Path) -> None:
     resp_local = client.get(f"/covers/{source_id}")
     assert resp_local.status_code == 200
     assert "image/jpeg" in resp_local.headers["content-type"]
+
+
+def test_web_no_duplicate_style_css_and_health_pill_keyboard_accessible_h20(tmp_path: Path) -> None:
+    """H-20: No duplicate web/style.css on disk, #system-health-pill is a keyboard-accessible button, and .connection-pill has no pointer cursor."""
+    web_dir = Path(__file__).resolve().parent.parent.parent / "src" / "playlist_sync" / "web"
+    assert (web_dir / "styles.css").exists()
+    assert not (web_dir / "style.css").exists()
+
+    index_html = (web_dir / "index.html").read_text(encoding="utf-8")
+    assert '<button id="system-health-pill"' in index_html
+
+    styles_css = (web_dir / "styles.css").read_text(encoding="utf-8")
+    assert (
+        ".health-pill, .connection-pill {\n  display: inline-flex;" not in styles_css
+        or "cursor: pointer;" not in styles_css.split(".connection-pill")[1].split("}")[0]
+    )
