@@ -3,19 +3,27 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
-USER_SYSTEMD_DIR="${HOME}/.config/systemd/user"
+REPO_DIR="${REPO_DIR:-$(cd "${SCRIPT_DIR}/.." && pwd)}"
+USER_SYSTEMD_DIR="${USER_SYSTEMD_DIR:-${HOME}/.config/systemd/user}"
+CURRENT_USER="${USER:-$(id -un)}"
 
 echo "=== Instalando servicio de usuario de Playlist Sync en Linux Mint ==="
 
 mkdir -p "${USER_SYSTEMD_DIR}"
 
-# Copiar unidad de servicio
-cp "${SCRIPT_DIR}/playlist-sync.service" "${USER_SYSTEMD_DIR}/playlist-sync.service"
+# Generar unidad de servicio sustituyendo la ruta del repositorio dinámicamente
+echo "Configurando ruta del repositorio: ${REPO_DIR}..."
+ESCAPED_REPO_DIR=$(printf '%s\n' "${REPO_DIR}" | sed -e 's/[\\|&]/\\&/g')
+sed "s|%h/playlist-sync|${ESCAPED_REPO_DIR}|g" "${SCRIPT_DIR}/playlist-sync.service" > "${USER_SYSTEMD_DIR}/playlist-sync.service"
+
+if [ "${INSTALL_SERVICE_ONLY:-0}" = "1" ]; then
+    echo "[OK] Archivo de servicio generado exitosamente en ${USER_SYSTEMD_DIR}/playlist-sync.service"
+    exit 0
+fi
 
 # Habilitar persistencia de sesión sin login interactivo (linger)
-echo "Habilitando lingering para el usuario actual (${USER})..."
-loginctl enable-linger "${USER}" || echo "[AVISO] No se pudo ejecutar loginctl enable-linger, verifica permisos de sudo."
+echo "Habilitando lingering para el usuario actual (${CURRENT_USER})..."
+loginctl enable-linger "${CURRENT_USER}" || echo "[AVISO] No se pudo ejecutar loginctl enable-linger, verifica permisos de sudo."
 
 # Recargar daemon de systemd de usuario
 systemctl --user daemon-reload

@@ -7,17 +7,19 @@ Write-Host "==================================================" -ForegroundColor
 
 # 1. Verificar Python 3.12
 Write-Host "[1/5] Verificando Python..." -ForegroundColor Yellow
-$pythonCmd = $null
+$pythonExe = $null
+$pythonArgs = @()
 if (Get-Command py -ErrorAction SilentlyContinue) {
-    $pythonCmd = "py -3.12"
+    $pythonExe = "py"
+    $pythonArgs = @("-3.12")
 } elseif (Get-Command python -ErrorAction SilentlyContinue) {
-    $pythonCmd = "python"
+    $pythonExe = "python"
 }
 
-if (-not $pythonCmd) {
+if (-not $pythonExe) {
     Write-Host "Python no detectado. Instalando Python 3.12 mediante winget..." -ForegroundColor Yellow
     winget install --id Python.Python.3.12 --exact --source winget --accept-package-agreements --accept-source-agreements
-    $pythonCmd = "python"
+    $pythonExe = "python"
 }
 
 # 2. Verificar ffmpeg
@@ -38,7 +40,7 @@ if (-not (Get-Command deno -ErrorAction SilentlyContinue)) {
 # 4. Crear venv e instalar dependencias
 Write-Host "[4/5] Configurando entorno virtual (.venv)..." -ForegroundColor Yellow
 if (-not (Test-Path ".venv")) {
-    & $pythonCmd -m venv .venv
+    & $pythonExe @pythonArgs -m venv .venv
 }
 
 $venvPython = ".\.venv\Scripts\python.exe"

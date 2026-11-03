@@ -24,4 +24,10 @@ max_retries = 3
 safety_threshold = 0.50
 # Descargas simultáneas (1 para no saturar PCs modestas)
 concurrency = 1
+# Pausa en segundos antes de cada descarga para evitar bloqueos de YouTube (H-17)
+sleep_interval = 2.0
+# Pausa en segundos entre solicitudes HTTP hacia YouTube (H-17)
+sleep_interval_requests = 1.0
+# Límite de velocidad de descarga en bytes/s (0 = sin límite)
+rate_limit_bytes = 0
 

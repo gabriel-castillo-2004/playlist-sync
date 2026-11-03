@@ -79,20 +79,37 @@ def find_ffmpeg_location() -> str | None:
 class YtDlpSource:
     """Source adapter backed by yt-dlp embedded API."""
 
-    def __init__(self, rate_limit_bytes: int | None = None) -> None:
-        self.rate_limit_bytes = rate_limit_bytes
+    def __init__(
+        self,
+        rate_limit_bytes: int | None = None,
+        sleep_interval: float | None = 2.0,
+        sleep_interval_requests: float | None = 1.0,
+    ) -> None:
+        self.rate_limit_bytes = (
+            rate_limit_bytes if rate_limit_bytes is not None and rate_limit_bytes > 0 else None
+        )
+        self.sleep_interval = (
+            sleep_interval if sleep_interval is not None and sleep_interval > 0 else None
+        )
+        self.sleep_interval_requests = (
+            sleep_interval_requests
+            if sleep_interval_requests is not None and sleep_interval_requests > 0
+            else None
+        )
 
     def inspect(self, url: str) -> SourceInfo:
         """Inspect a playlist URL without downloading files."""
         validate_youtube_url(url)
 
-        ydl_opts = {
+        ydl_opts: dict[str, object] = {
             "extract_flat": True,
             "quiet": True,
             "no_warnings": True,
             "skip_download": True,
             "ignoreerrors": False,
         }
+        if self.sleep_interval_requests is not None:
+            ydl_opts["sleep_interval_requests"] = self.sleep_interval_requests
 
         try:
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
@@ -135,13 +152,15 @@ class YtDlpSource:
         """Fetch remote entries for a source without downloading."""
         validate_youtube_url(source.url)
 
-        ydl_opts = {
+        ydl_opts: dict[str, object] = {
             "extract_flat": True,
             "quiet": True,
             "no_warnings": True,
             "skip_download": True,
             "ignoreerrors": True,  # Keep going past individual removed/private items
         }
+        if self.sleep_interval_requests is not None:
+            ydl_opts["sleep_interval_requests"] = self.sleep_interval_requests
 
         try:
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
@@ -265,6 +284,10 @@ class YtDlpSource:
 
         if self.rate_limit_bytes:
             ydl_opts["ratelimit"] = self.rate_limit_bytes
+        if self.sleep_interval is not None:
+            ydl_opts["sleep_interval"] = self.sleep_interval
+        if self.sleep_interval_requests is not None:
+            ydl_opts["sleep_interval_requests"] = self.sleep_interval_requests
 
         try:
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:

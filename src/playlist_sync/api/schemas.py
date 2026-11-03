@@ -54,6 +54,7 @@ class ActionResponse(BaseModel):
     success: bool
     message: str
     source_id: int | None = None
+    reconciled_count: int | None = None
 
 
 class ErrorResponse(BaseModel):

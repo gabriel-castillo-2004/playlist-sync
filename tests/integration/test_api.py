@@ -301,3 +301,52 @@ def test_error_response_hides_technical_detail_and_logs_it(tmp_path: Path) -> No
 
     log_content = log_file.read_text(encoding="utf-8")
     assert "Fake private playlist" in log_content
+
+
+def test_reconcile_endpoints_rf20(tmp_path: Path) -> None:
+    """RF-20: REST endpoints POST /reconcile and POST /sources/{id}/reconcile update DB from disk."""
+    db_file = tmp_path / "reconcile_api.sqlite3"
+    music_root = tmp_path / "music"
+    repo = SQLiteRepo(db_file)
+    items = [
+        RemoteItem(external_id="v1_rec", title="Song 1", position=1, url="http://v1"),
+        RemoteItem(external_id="v2_rec", title="Song 2", position=2, url="http://v2"),
+    ]
+    fake = FakeSource(title="API Reconcile", items=items)
+
+    app = create_app(
+        repo=repo,
+        source_adapter=fake,
+        music_root=music_root,
+        log_file=str(tmp_path / "reconcile_api.log"),
+    )
+    app.state.doctor = make_mock_doctor()
+    client = TestClient(app)
+
+    resp_add = client.post("/sources", json={"url": "https://youtube.com/playlist?list=PLrec"})
+    assert resp_add.status_code == 201
+    source_id = resp_add.json()["id"]
+    folder_name = resp_add.json()["folder_name"]
+
+    repo.upsert_item(source_id=source_id, external_id="v1_rec", title="Song 1", position=1)
+    repo.upsert_item(source_id=source_id, external_id="v2_rec", title="Song 2", position=2)
+
+    src_dir = music_root / folder_name
+    src_dir.mkdir(parents=True, exist_ok=True)
+    (src_dir / "Song 1 [v1_rec].mp3").write_bytes(b"MP3_BYTES_1")
+
+    resp_rec = client.post("/reconcile")
+    assert resp_rec.status_code == 200
+    body = resp_rec.json()
+    assert body["success"] is True
+    assert body["reconciled_count"] == 1
+
+    # Add second file on disk and reconcile via source-specific endpoint
+    (src_dir / "Song 2 [v2_rec].mp3").write_bytes(b"MP3_BYTES_2")
+    resp_src_rec = client.post(f"/sources/{source_id}/reconcile")
+    assert resp_src_rec.status_code == 200
+    assert resp_src_rec.json()["reconciled_count"] == 1
+
+    detail = client.get(f"/sources/{source_id}").json()
+    assert detail["downloaded_count"] == 2
+    assert detail["pending_count"] == 0

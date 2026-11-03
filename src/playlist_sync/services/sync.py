@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import re
 import shutil
 from collections.abc import Callable
 from pathlib import Path
@@ -229,3 +230,119 @@ def sync_source_service(
         removed_count=len(plan.items_to_mark_removed),
         failed_items=failed_items,
     )
+
+
+_DISK_MP3_SUFFIX_RE = re.compile(r"^(?P<title>.+?)\s*\[(?P<ext_id>[^\[\]]+)\]\.mp3$", re.IGNORECASE)
+
+
+def reconcile_disk_service(
+    repo: SQLiteRepo,
+    music_root: Path,
+    source_id: int | None = None,
+    library: Library | None = None,
+) -> int:
+    """Scan music_root and mark items whose [{external_id}].mp3 exists on disk as DOWNLOADED (RF-20)."""
+    if source_id is not None:
+        src = repo.get_source(source_id)
+        if not src:
+            raise AppError(
+                ErrorCode.SOURCE_NOT_FOUND,
+                technical_detail=f"Source ID {source_id} does not exist in local database.",
+            )
+        sources = [src]
+    else:
+        sources = repo.list_sources()
+
+    if not sources or not music_root.exists():
+        return 0
+
+    lib = library or LocalLibrary(music_root)
+    reconciled_total = 0
+
+    # Build a fallback index of all *.mp3 files across music_root
+    all_mp3s: list[Path] = [
+        p for p in music_root.rglob("*.mp3") if p.is_file() and p.stat().st_size > 0
+    ]
+
+    for source in sources:
+        source_dir = music_root / source.folder_name
+        dir_mp3s: list[Path] = []
+        if source_dir.exists() and source_dir.is_dir():
+            dir_mp3s = sorted(
+                p
+                for p in source_dir.iterdir()
+                if p.is_file() and p.suffix.lower() == ".mp3" and p.stat().st_size > 0
+            )
+
+        existing_items = {it.external_id: it for it in repo.get_items_by_source(source.id)}
+        source_reconciled = 0
+
+        # 1. Reconcile existing DB items for this source by matching [{external_id}].mp3 suffix
+        for ext_id, item_rec in existing_items.items():
+            suffix_lower = f"[{ext_id}].mp3".lower()
+            matched_file: Path | None = None
+
+            for candidate in dir_mp3s:
+                if candidate.name.lower().endswith(suffix_lower):
+                    matched_file = candidate
+                    break
+            if matched_file is None:
+                for candidate in all_mp3s:
+                    if candidate.name.lower().endswith(suffix_lower):
+                        matched_file = candidate
+                        break
+
+            if matched_file is not None and (
+                item_rec.status != ItemStatus.DOWNLOADED
+                or item_rec.file_path != str(matched_file)
+                or item_rec.error_code is not None
+            ):
+                repo.update_item_status(
+                    item_id=item_rec.id,
+                    status=ItemStatus.DOWNLOADED,
+                    error_code=None,
+                    error_message=None,
+                    file_path=str(matched_file),
+                )
+                source_reconciled += 1
+
+        # 2. Discover untracked [{external_id}].mp3 files inside source_dir (e.g. after sources.json import)
+        next_pos = max((it.position for it in existing_items.values()), default=0) + 1
+        for candidate in dir_mp3s:
+            m = _DISK_MP3_SUFFIX_RE.match(candidate.name)
+            if not m:
+                continue
+            ext_id = m.group("ext_id")
+            if ext_id in existing_items:
+                continue
+            parsed_title = m.group("title").strip() or ext_id
+            new_item = repo.upsert_item(
+                source_id=source.id,
+                external_id=ext_id,
+                title=parsed_title,
+                position=next_pos,
+            )
+            repo.update_item_status(
+                item_id=new_item.id,
+                status=ItemStatus.DOWNLOADED,
+                error_code=None,
+                error_message=None,
+                file_path=str(candidate),
+            )
+            existing_items[ext_id] = new_item
+            next_pos += 1
+            source_reconciled += 1
+
+        if source_reconciled > 0:
+            reconciled_total += source_reconciled
+            updated_items = repo.get_items_by_source(source.id)
+            try:
+                lib.rebuild_playlist_file(source=source, items=updated_items)
+            except Exception as exc:
+                logger.warning(
+                    "Could not rebuild playlist file during reconcile for source %s: %s",
+                    source.id,
+                    exc,
+                )
+
+    return reconciled_total

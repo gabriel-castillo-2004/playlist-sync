@@ -3,17 +3,34 @@
 from __future__ import annotations
 
 import logging
+from pathlib import Path
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, status
 
-from playlist_sync.api.deps import get_job_executor
+from playlist_sync.adapters.repo import SQLiteRepo
+from playlist_sync.api.deps import get_job_executor, get_music_root, get_repo
 from playlist_sync.api.schemas import ActionResponse
 from playlist_sync.core.errors import AppError, ErrorCode
 from playlist_sync.services.jobs import JobExecutor
+from playlist_sync.services.sync import reconcile_disk_service
 
 router = APIRouter(tags=["sync"])
 logger = logging.getLogger(__name__)
+
+
+@router.post("/reconcile", response_model=ActionResponse)
+def reconcile_all_sources_endpoint(
+    repo: Annotated[SQLiteRepo, Depends(get_repo)],
+    music_root: Annotated[Path, Depends(get_music_root)],
+) -> ActionResponse:
+    """Scan music_root and mark matching [{external_id}].mp3 items as downloaded (RF-20)."""
+    count = reconcile_disk_service(repo=repo, music_root=music_root)
+    return ActionResponse(
+        success=True,
+        message=f"Reconciliación completada: {count} archivos vinculados en disco.",
+        reconciled_count=count,
+    )
 
 
 @router.post("/sync-all", response_model=ActionResponse)

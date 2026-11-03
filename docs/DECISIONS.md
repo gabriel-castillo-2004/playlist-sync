@@ -181,5 +181,18 @@ Este documento registra las decisiones técnicas tomadas a lo largo del proyecto
 - **Motivo:** Mitigar vectores SSRF, ataques de expansión de entidades XML (Billion Laughs / XXE), peticiones cross-origin no autorizadas y fuga de detalles internos en respuestas HTTP.
 - **Alternativas descartadas:** Validar solo la URL inicial sin inspeccionar redirecciones HTTP o mantener `xml.etree.ElementTree` estándar.
 
+---
+
+## ADR-016: Etapa R4 — Servicio `systemd` con `PATH` de Deno y ruta dinámica, pausas/auto-actualización `yt-dlp` en Python, reconciliación en disco (RF-20) y `install.ps1` en Windows 11 (H-08, H-17, RF-20, H-04)
+- **Fecha:** 2026-11-02
+- **Decisión:**
+  - **H-08 (resto):** En `systemd/playlist-sync.service`, agregar `Environment="PATH=%h/.deno/bin:/usr/local/bin:/usr/bin:/bin"` para que `yt-dlp` y `doctor` encuentren el binario de Deno instalado en `~/.deno/bin` bajo sesiones de `systemd --user`. En `systemd/install-service.sh`, reemplazar el `cp` estático por sustitución dinámica mediante `sed` de `%h/playlist-sync` con la ruta real `REPO_DIR`.
+  - **H-17:** Añadir `sleep_interval = 2.0`, `sleep_interval_requests = 1.0` y `rate_limit_bytes = 0` en `config.toml` (`[sync]`), propagándolos desde `main.py` hacia `CompositeSource` y `YtDlpSource` (`ydl_opts["sleep_interval"]`, `ydl_opts["sleep_interval_requests"]` y `ydl_opts["ratelimit"]`). Implementar `auto_update_ytdlp()` en `src/playlist_sync/main.py` invocada al iniciar `serve` tras `setup_logging`, registrando el éxito con `logger.info` o el fallo/ausencia de red con `logger.warning` sin detener el arranque (RF-16).
+  - **RF-20:** Implementar `reconcile_disk_service` en `src/playlist_sync/services/sync.py` para escanear `music_root`, vinculando los archivos existentes que coincidan por sufijo `[{external_id}].mp3` (tanto elementos existentes en SQLite como archivos presentes tras importar `sources.json`), marcándolos como `DOWNLOADED` y regenerando el `.m3u8`. Exponer la operación mediante el subcomando CLI `reconcile`, los endpoints REST `POST /reconcile` y `POST /sources/{source_id}/reconcile`, y el botón "Verificar archivos" (`#btn-reconcile`) en la interfaz web.
+  - **H-04:** En `install.ps1`, separar el ejecutable (`$pythonExe = "py"`) y su lista de argumentos (`$pythonArgs = @("-3.12")`) e invocar `& $pythonExe @pythonArgs -m venv .venv`, evitando el fallo del operador `&` de PowerShell en Windows 11.
+- **Motivo:** Garantizar la operación desatendida en Linux Mint 22.3, la prevención de bloqueos por límite de tasa en YouTube, la reconciliación sin redescargas frente a bibliotecas locales existentes y la instalación limpia en Windows 11.
+- **Alternativas descartadas:** Mantener la actualización de `yt-dlp` únicamente en scripts shell externos sin registro en `playlist_sync.log` o requerir redescarga de pistas ya presentes en `music_root`.
+
+
 
 

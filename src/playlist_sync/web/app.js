@@ -20,6 +20,7 @@
   // DOM Elements
   const elements = {
     sourcesContainer: document.getElementById('sources-container'),
+    btnReconcile: document.getElementById('btn-reconcile'),
     btnSyncAll: document.getElementById('btn-sync-all'),
     addForm: document.getElementById('add-source-form'),
     sourceInput: document.getElementById('source-url-input'),
@@ -530,6 +531,16 @@
     }
   }
 
+  async function handleReconcile() {
+    try {
+      const res = await apiRequest('/reconcile', { method: 'POST' });
+      showToast(res.message || 'Archivos verificados en disco.');
+      await loadSources(false);
+    } catch (err) {
+      showToast(err.message || 'No se pudo verificar los archivos en disco.');
+    }
+  }
+
   async function handleToggleItems(sourceId) {
     if (state.expandedSources.has(sourceId)) {
       state.expandedSources.delete(sourceId);
@@ -633,6 +644,9 @@
     elements.btnCloseError.addEventListener('click', hideAddError);
     elements.btnCloseSearch.addEventListener('click', hidePodcastSearch);
     elements.btnSyncAll.addEventListener('click', handleSyncAll);
+    if (elements.btnReconcile) {
+      elements.btnReconcile.addEventListener('click', handleReconcile);
+    }
 
     elements.healthPill.addEventListener('click', () => {
       showHealthModal();

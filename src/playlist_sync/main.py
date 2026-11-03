@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 import argparse
+import logging
+import subprocess
 import sys
 import tomllib
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -13,9 +16,56 @@ from playlist_sync.adapters.repo import SQLiteRepo
 from playlist_sync.core.errors import AppError
 from playlist_sync.core.models import Progress, Source
 from playlist_sync.doctor import run_doctor
+from playlist_sync.logging_config import setup_logging
 from playlist_sync.services.backup import create_database_backup, restore_database_backup
 from playlist_sync.services.migration import export_sources_to_json, import_sources_from_json
-from playlist_sync.services.sync import add_source_service, sync_source_service
+from playlist_sync.services.sync import (
+    add_source_service,
+    reconcile_disk_service,
+    sync_source_service,
+)
+
+logger = logging.getLogger(__name__)
+
+
+def auto_update_ytdlp(
+    run_fn: Callable[..., subprocess.CompletedProcess[str]] = subprocess.run,
+    timeout: float = 30.0,
+) -> bool:
+    """Attempt to upgrade yt-dlp[default] at startup and log the outcome (RF-16, H-17)."""
+    cmd = [
+        sys.executable,
+        "-m",
+        "pip",
+        "install",
+        "--upgrade",
+        "--no-input",
+        "yt-dlp[default]",
+    ]
+    try:
+        res = run_fn(
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            check=False,
+        )
+        if res.returncode == 0:
+            logger.info("Auto-actualización de yt-dlp[default] completada exitosamente.")
+            return True
+        detail = (res.stderr or res.stdout or "").strip()
+        logger.warning(
+            "No se pudo actualizar yt-dlp (código %s), continuando con la versión instalada: %s",
+            res.returncode,
+            detail,
+        )
+        return False
+    except Exception as exc:
+        logger.warning(
+            "Fallo al intentar actualizar yt-dlp (posiblemente sin internet), continuando con la versión instalada: %s",
+            exc,
+        )
+        return False
 
 
 def load_config() -> dict[str, object]:
@@ -36,6 +86,9 @@ def load_config() -> dict[str, object]:
         "sync": {
             "safety_threshold": 0.50,
             "max_retries": 3,
+            "sleep_interval": 2.0,
+            "sleep_interval_requests": 1.0,
+            "rate_limit_bytes": 0,
         },
     }
 
@@ -212,6 +265,30 @@ def cmd_restore_backup(backup_file: str, db_path: str) -> int:
         return 1
 
 
+def cmd_reconcile(repo: SQLiteRepo, music_root: Path, source_target: str = "all") -> int:
+    """Scan music_root and mark matching [{external_id}].mp3 items as DOWNLOADED (RF-20)."""
+    source_id: int | None = None
+    if source_target.lower() != "all":
+        try:
+            source_id = int(source_target)
+        except ValueError:
+            print(f"Error: '{source_target}' no es un ID valido (debe ser un numero o 'all').")
+            return 1
+
+    try:
+        count = reconcile_disk_service(repo=repo, music_root=music_root, source_id=source_id)
+        print(
+            f"[OK] Reconciliacion con disco completada: {count} elementos marcados como descargados."
+        )
+        return 0
+    except AppError as err:
+        print(f"[ERROR] {err.user_message}")
+        return 1
+    except Exception as exc:
+        print(f"[ERROR] No se pudo reconciliar con disco: {exc}")
+        return 1
+
+
 def main() -> None:
     """CLI router for Playlist Sync."""
     if hasattr(sys.stdout, "reconfigure"):
@@ -266,6 +343,18 @@ def main() -> None:
     )
     parser_restore.add_argument("backup_file", help="Ruta del archivo de respaldo .sqlite3")
 
+    # Reconcile disk (RF-20)
+    parser_reconcile = subparsers.add_parser(
+        "reconcile",
+        help="Escanear music_root y marcar como descargados los elementos existentes en disco",
+    )
+    parser_reconcile.add_argument(
+        "target",
+        nargs="?",
+        default="all",
+        help="ID de la fuente (ej. '1') o 'all' para reconciliar todas",
+    )
+
     # Serve
     parser_serve = subparsers.add_parser("serve", help="Iniciar servidor web local (FastAPI)")
     parser_serve.add_argument("--host", default=None, help="Dirección host a enlazar")
@@ -293,9 +382,17 @@ def main() -> None:
     safety_threshold = float(str(sync_cfg.get("safety_threshold", 0.50)))
     max_retries = int(str(sync_cfg.get("max_retries", 3)))
     interval_hours = float(str(sync_cfg.get("interval_hours", 6.0)))
+    sleep_interval = float(str(sync_cfg.get("sleep_interval", 2.0)))
+    sleep_interval_requests = float(str(sync_cfg.get("sleep_interval_requests", 1.0)))
+    raw_rate_limit = int(str(sync_cfg.get("rate_limit_bytes", 0)))
+    rate_limit_bytes = raw_rate_limit if raw_rate_limit > 0 else None
 
     repo = SQLiteRepo(db_path)
-    source_adapter = CompositeSource()
+    source_adapter = CompositeSource(
+        rate_limit_bytes=rate_limit_bytes,
+        sleep_interval=sleep_interval,
+        sleep_interval_requests=sleep_interval_requests,
+    )
 
     if args.subcommand == "add":
         code = cmd_add(args.url, repo, source_adapter)
@@ -326,14 +423,13 @@ def main() -> None:
     elif args.subcommand == "restore-backup":
         code = cmd_restore_backup(args.backup_file, db_path)
         sys.exit(code)
+    elif args.subcommand == "reconcile":
+        code = cmd_reconcile(repo, music_root, args.target)
+        sys.exit(code)
     elif args.subcommand == "serve":
         import uvicorn
 
         from playlist_sync.api.app import create_app
-
-        # Automatic database backup on server startup (Phase 6)
-        if Path(db_path).exists():
-            create_database_backup(db_path)
 
         raw_server = cfg.get("server")
         server_cfg: dict[str, Any] = raw_server if isinstance(raw_server, dict) else {}
@@ -341,6 +437,15 @@ def main() -> None:
         port = args.port or int(str(server_cfg.get("port", 8000)))
         log_file = str(server_cfg.get("log_file", "playlist_sync.log"))
         log_level = str(server_cfg.get("log_level", "INFO"))
+
+        setup_logging(log_file=log_file, level_name=log_level, force=True)
+
+        # Auto-update yt-dlp on startup and log result (RF-16, H-17)
+        auto_update_ytdlp()
+
+        # Automatic database backup on server startup (Phase 6)
+        if Path(db_path).exists():
+            create_database_backup(db_path)
 
         app = create_app(
             repo=repo,

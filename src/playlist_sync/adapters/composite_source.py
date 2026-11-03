@@ -41,8 +41,15 @@ class CompositeSource(Source):
         self,
         yt_source: Source | None = None,
         rss_source: Source | None = None,
+        rate_limit_bytes: int | None = None,
+        sleep_interval: float | None = 2.0,
+        sleep_interval_requests: float | None = 1.0,
     ) -> None:
-        self.yt_source = yt_source or YtDlpSource()
+        self.yt_source = yt_source or YtDlpSource(
+            rate_limit_bytes=rate_limit_bytes,
+            sleep_interval=sleep_interval,
+            sleep_interval_requests=sleep_interval_requests,
+        )
         self.rss_source = rss_source or RssSource()
 
     def inspect(self, url: str) -> SourceInfo:

@@ -89,3 +89,72 @@ def test_cmd_sync_invalid_target(tmp_path: Path, capsys: pytest.CaptureFixture[s
     assert ret == 1
     out = capsys.readouterr().out
     assert "no es un ID valido" in out
+
+
+def test_reconcile_disk_service_and_cli_rf20(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """RF-20: Reconcile scans music_root and marks items with matching [external_id].mp3 as DOWNLOADED."""
+    from playlist_sync.core.models import ItemStatus, SourceKind
+    from playlist_sync.main import cmd_reconcile
+    from playlist_sync.services.sync import reconcile_disk_service
+
+    db_file = tmp_path / "reconcile.db"
+    music_root = tmp_path / "music"
+    repo = SQLiteRepo(db_file)
+
+    src = repo.add_source(
+        kind=SourceKind.YT_PLAYLIST,
+        url="https://www.youtube.com/playlist?list=PLreconcile",
+        title="My Rock Playlist",
+    )
+    repo.upsert_item(source_id=src.id, external_id="dQw4w9WgXcQ", title="Track One", position=1)
+    it2 = repo.upsert_item(
+        source_id=src.id, external_id="9bZkp7q19f0", title="Track Two", position=2
+    )
+    repo.update_item_status(
+        it2.id, status=ItemStatus.ERROR, error_code="NETWORK", error_message="Sin red"
+    )
+    repo.upsert_item(source_id=src.id, external_id="missing12345", title="Track Three", position=3)
+
+    folder = music_root / src.folder_name
+    folder.mkdir(parents=True, exist_ok=True)
+    mp3_1 = folder / "Track One [dQw4w9WgXcQ].mp3"
+    mp3_2 = folder / "Track Two [9bZkp7q19f0].mp3"
+    mp3_4 = folder / "Track Four [newdisk1234].mp3"
+    mp3_1.write_bytes(b"ID3DATA1")
+    mp3_2.write_bytes(b"ID3DATA2")
+    mp3_4.write_bytes(b"ID3DATA4")
+
+    ret = cmd_reconcile(repo=repo, music_root=music_root, source_target="all")
+    assert ret == 0
+    out = capsys.readouterr().out
+    assert "3" in out
+
+    items_by_ext = {it.external_id: it for it in repo.get_items_by_source(src.id)}
+    assert items_by_ext["dQw4w9WgXcQ"].status == ItemStatus.DOWNLOADED
+    assert items_by_ext["dQw4w9WgXcQ"].file_path == str(mp3_1)
+
+    assert items_by_ext["9bZkp7q19f0"].status == ItemStatus.DOWNLOADED
+    assert items_by_ext["9bZkp7q19f0"].file_path == str(mp3_2)
+    assert items_by_ext["9bZkp7q19f0"].error_code is None
+
+    assert items_by_ext["newdisk1234"].status == ItemStatus.DOWNLOADED
+    assert items_by_ext["newdisk1234"].file_path == str(mp3_4)
+
+    assert items_by_ext["missing12345"].status == ItemStatus.PENDING
+    assert items_by_ext["missing12345"].file_path is None
+
+    # Second run is idempotent (0 newly reconciled)
+    assert reconcile_disk_service(repo=repo, music_root=music_root) == 0
+
+
+def test_install_ps1_separates_py_command_and_args_h04() -> None:
+    """H-04: install.ps1 must separate executable ('py') and arguments ('-3.12') for PowerShell invocation."""
+    root = Path(__file__).resolve().parent.parent.parent
+    ps1_text = (root / "install.ps1").read_text(encoding="utf-8")
+
+    assert '"py -3.12"' not in ps1_text
+    assert '$pythonExe = "py"' in ps1_text
+    assert '@("-3.12")' in ps1_text
+    assert "& $pythonExe @pythonArgs -m venv .venv" in ps1_text

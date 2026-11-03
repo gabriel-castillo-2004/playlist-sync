@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from fastapi import Request
 
 from playlist_sync.adapters.repo import SQLiteRepo
@@ -11,6 +13,10 @@ from playlist_sync.services.jobs import JobExecutor, SSEBroadcaster
 
 def get_repo(request: Request) -> SQLiteRepo:
     return request.app.state.repo  # type: ignore[no-any-return]
+
+
+def get_music_root(request: Request) -> Path:
+    return request.app.state.music_root  # type: ignore[no-any-return]
 
 
 def get_job_executor(request: Request) -> JobExecutor:

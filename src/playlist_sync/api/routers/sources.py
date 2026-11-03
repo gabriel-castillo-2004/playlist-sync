@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 import logging
+from pathlib import Path
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, status
 
 from playlist_sync.adapters.repo import SQLiteRepo
-from playlist_sync.api.deps import get_job_executor, get_repo, get_source_adapter
+from playlist_sync.api.deps import get_job_executor, get_music_root, get_repo, get_source_adapter
 from playlist_sync.api.schemas import (
     ActionResponse,
     ItemResponse,
@@ -19,7 +20,7 @@ from playlist_sync.api.schemas import (
 from playlist_sync.core.errors import AppError, ErrorCode
 from playlist_sync.core.models import ItemStatus, Source, SourceRecord
 from playlist_sync.services.jobs import JobExecutor
-from playlist_sync.services.sync import add_source_service
+from playlist_sync.services.sync import add_source_service, reconcile_disk_service
 
 router = APIRouter(prefix="/sources", tags=["sources"])
 logger = logging.getLogger(__name__)
@@ -153,3 +154,29 @@ async def sync_source(
                 "user_message": err.user_message,
             },
         ) from err
+
+
+@router.post("/{source_id}/reconcile", response_model=ActionResponse)
+def reconcile_source_endpoint(
+    source_id: int,
+    repo: Annotated[SQLiteRepo, Depends(get_repo)],
+    music_root: Annotated[Path, Depends(get_music_root)],
+) -> ActionResponse:
+    """Reconcile a specific source's database items against disk files (RF-20)."""
+    source = repo.get_source(source_id)
+    if not source:
+        logger.warning("Source %d not found for reconcile", source_id)
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={
+                "code": ErrorCode.SOURCE_NOT_FOUND,
+                "user_message": "No se encontró la fuente solicitada.",
+            },
+        )
+    count = reconcile_disk_service(repo=repo, music_root=music_root, source_id=source_id)
+    return ActionResponse(
+        success=True,
+        message=f"Reconciliación completada: {count} archivos vinculados en disco.",
+        source_id=source_id,
+        reconciled_count=count,
+    )

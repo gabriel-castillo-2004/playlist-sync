@@ -205,3 +205,142 @@ def test_ytdlp_default_extra_and_ejs_dependency_configured() -> None:
     assert "yt-dlp[default]" in start_bat_text
     assert "yt-dlp[default]" in service_text
     assert importlib.util.find_spec("yt_dlp_ejs") is not None
+
+
+def test_systemd_service_and_installer_h08_configuration(tmp_path: Path) -> None:
+    """H-08 (resto): Verify systemd service includes ~/.deno/bin in PATH and install-service.sh substitutes repo path dynamically."""
+    import subprocess
+
+    root = Path(__file__).resolve().parent.parent.parent
+    service_file = root / "systemd" / "playlist-sync.service"
+    installer_file = root / "systemd" / "install-service.sh"
+
+    service_text = service_file.read_text(encoding="utf-8")
+
+    # 1. playlist-sync.service must define PATH with ~/.deno/bin (%h/.deno/bin)
+    assert 'Environment="PATH=%h/.deno/bin:/usr/local/bin:/usr/bin:/bin"' in service_text
+
+    # 2. install-service.sh must substitute repo path dynamically
+    installer_text = installer_file.read_text(encoding="utf-8")
+    assert "sed " in installer_text
+
+    # 3. Run install-service.sh with overridden REPO_DIR and USER_SYSTEMD_DIR
+    custom_repo_dir = "/opt/custom-proyectos/playlist-sync"
+    custom_systemd_user_dir = tmp_path / "systemd_user"
+    custom_systemd_user_dir.mkdir(parents=True, exist_ok=True)
+
+    env = {
+        "PATH": "/usr/local/bin:/usr/bin:/bin",
+        "REPO_DIR": custom_repo_dir,
+        "USER_SYSTEMD_DIR": str(custom_systemd_user_dir),
+        "INSTALL_SERVICE_ONLY": "1",
+    }
+    result = subprocess.run(
+        ["bash", str(installer_file)],
+        env=env,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    assert result.returncode == 0
+
+    installed_service_file = custom_systemd_user_dir / "playlist-sync.service"
+    assert installed_service_file.exists()
+    installed_text = installed_service_file.read_text(encoding="utf-8")
+
+    assert f"WorkingDirectory={custom_repo_dir}" in installed_text
+    assert f"ExecStartPre=-{custom_repo_dir}/.venv/bin/pip" in installed_text
+    assert f"ExecStart={custom_repo_dir}/.venv/bin/python" in installed_text
+    assert "%h/playlist-sync" not in installed_text
+    assert 'Environment="PATH=%h/.deno/bin:/usr/local/bin:/usr/bin:/bin"' in installed_text
+
+
+def test_ytdlp_sleep_intervals_and_config_h17(tmp_path: Path) -> None:
+    """H-17: YtDlpSource configures sleep_interval and sleep_interval_requests from config.toml."""
+    import tomllib
+
+    root = Path(__file__).resolve().parent.parent.parent
+    cfg = tomllib.loads((root / "config.toml").read_text(encoding="utf-8"))
+    sync_cfg = cfg["sync"]
+
+    assert "sleep_interval" in sync_cfg
+    assert "sleep_interval_requests" in sync_cfg
+    assert float(sync_cfg["sleep_interval"]) > 0
+    assert float(sync_cfg["sleep_interval_requests"]) > 0
+
+    adapter = YtDlpSource(
+        rate_limit_bytes=512_000,
+        sleep_interval=float(sync_cfg["sleep_interval"]),
+        sleep_interval_requests=float(sync_cfg["sleep_interval_requests"]),
+    )
+    item = RemoteItem(
+        external_id="v_h17",
+        title="Sleep Test Track",
+        position=1,
+        url="https://www.youtube.com/watch?v=v_h17",
+    )
+    dest_dir = tmp_path / "music_h17"
+    expected_file = dest_dir / "Sleep Test Track [v_h17].mp3"
+
+    captured_opts: dict[str, object] = {}
+
+    def fake_ydl_init(opts: dict[str, object]) -> MagicMock:
+        captured_opts.update(opts)
+        mock_ydl = MagicMock()
+        mock_ydl.__enter__.return_value = mock_ydl
+
+        def _dl(urls: list[str]) -> None:
+            dest_dir.mkdir(parents=True, exist_ok=True)
+            expected_file.write_bytes(b"MP3")
+
+        mock_ydl.download.side_effect = _dl
+        return mock_ydl
+
+    with patch("yt_dlp.YoutubeDL", side_effect=fake_ydl_init):
+        adapter.download(item, dest_dir)
+
+    assert captured_opts.get("sleep_interval") == float(sync_cfg["sleep_interval"])
+    assert captured_opts.get("sleep_interval_requests") == float(
+        sync_cfg["sleep_interval_requests"]
+    )
+    assert captured_opts.get("ratelimit") == 512_000
+
+
+def test_auto_update_ytdlp_online_and_offline_h17(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """H-17 / RF-16: auto_update_ytdlp in main.py logs outcome with and without network."""
+    import logging
+    import subprocess
+
+    from playlist_sync.main import auto_update_ytdlp
+
+    # 1. Simulated online success
+    def mock_run_ok(cmd: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        assert "yt-dlp[default]" in cmd
+        return subprocess.CompletedProcess(
+            args=cmd, returncode=0, stdout="Successfully installed yt-dlp", stderr=""
+        )
+
+    with caplog.at_level(logging.INFO):
+        caplog.clear()
+        ok = auto_update_ytdlp(run_fn=mock_run_ok)
+        assert ok is True
+        assert any("yt-dlp" in rec.message.lower() for rec in caplog.records)
+
+    # 2. Simulated offline failure (nonzero returncode)
+    def mock_run_offline(cmd: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess(
+            args=cmd,
+            returncode=1,
+            stdout="",
+            stderr="WARNING: Retrying... NewConnectionError: Failed to establish a new connection",
+        )
+
+    with caplog.at_level(logging.WARNING):
+        caplog.clear()
+        ok_off = auto_update_ytdlp(run_fn=mock_run_offline)
+        assert ok_off is False
+        assert any(
+            rec.levelname == "WARNING" and "yt-dlp" in rec.message.lower() for rec in caplog.records
+        )
