@@ -217,13 +217,27 @@ class SQLiteRepo:
         source_id: int,
         title: str,
         cover_url: str | None = None,
-    ) -> None:
-        """Update title or cover URL of a source."""
+        last_known_count: int | None = None,
+    ) -> SourceRecord:
+        """Update title, cover URL or initial known count of a source."""
         with self._conn() as conn:
-            conn.execute(
-                "UPDATE sources SET title = ?, cover_url = COALESCE(?, cover_url) WHERE id = ?;",
-                (title, cover_url, source_id),
-            )
+            if last_known_count is not None:
+                conn.execute(
+                    """
+                    UPDATE sources
+                    SET title = ?, cover_url = COALESCE(?, cover_url), last_known_count = ?
+                    WHERE id = ?;
+                    """,
+                    (title, cover_url, last_known_count, source_id),
+                )
+            else:
+                conn.execute(
+                    "UPDATE sources SET title = ?, cover_url = COALESCE(?, cover_url) WHERE id = ?;",
+                    (title, cover_url, source_id),
+                )
+            row = conn.execute("SELECT * FROM sources WHERE id = ?;", (source_id,)).fetchone()
+            assert row is not None
+            return self._row_to_source(row)
 
     # -------------------------------------------------------------------------
     # Items CRUD
@@ -286,11 +300,24 @@ class SQLiteRepo:
         error_message: str | None = None,
         file_path: str | None = None,
         increment_attempts: bool = False,
+        reset_attempts: bool = False,
     ) -> None:
         """Update an item's status, error info or file path."""
         now = datetime.now(UTC).isoformat() if status == ItemStatus.DOWNLOADED else None
         with self._conn() as conn:
-            if increment_attempts:
+            if reset_attempts:
+                conn.execute(
+                    """
+                    UPDATE items
+                    SET status = ?, error_code = ?, error_message = ?,
+                        file_path = COALESCE(?, file_path),
+                        downloaded_at = COALESCE(?, downloaded_at),
+                        attempts = 0
+                    WHERE id = ?;
+                    """,
+                    (status.value, error_code, error_message, file_path, now, item_id),
+                )
+            elif increment_attempts:
                 conn.execute(
                     """
                     UPDATE items

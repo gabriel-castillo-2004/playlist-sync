@@ -7,6 +7,29 @@ import math
 from playlist_sync.core.errors import AppError, ErrorCode
 from playlist_sync.core.models import ItemRecord, ItemStatus, RemoteItem, SyncPlan
 
+NON_RETRYABLE_ERROR_CODES = {
+    ErrorCode.AGE_RESTRICTED,
+    ErrorCode.GEO_BLOCKED,
+    ErrorCode.ITEM_UNAVAILABLE,
+    ErrorCode.PRIVATE_SOURCE,
+    ErrorCode.INVALID_URL,
+    ErrorCode.SOURCE_NOT_FOUND,
+}
+
+
+def is_error_retryable(error_code: str | None) -> bool:
+    """Return True if an item error code can be automatically retried (RF-8, H-12)."""
+    if error_code is None:
+        return True
+    return error_code not in NON_RETRYABLE_ERROR_CODES
+
+
+def calculate_retry_backoff_seconds(attempts: int, base_seconds: float = 1.0) -> float:
+    """Return exponential backoff wait time in seconds before retrying a transient failure (RF-8, H-12)."""
+    if attempts <= 0 or base_seconds <= 0:
+        return 0.0
+    return float(base_seconds * (2 ** (attempts - 1)))
+
 
 def evaluate_remote_safety(
     last_known_count: int,
@@ -78,11 +101,11 @@ def calculate_sync_plan(
             elif existing.status in (ItemStatus.PENDING, ItemStatus.DOWNLOADING):
                 items_to_download.append(remote_item)
             elif existing.status == ItemStatus.ERROR:
-                if existing.attempts < max_retries:
+                if existing.attempts < max_retries and is_error_retryable(existing.error_code):
                     items_to_download.append(remote_item)
                 elif existing.removed_remote:
                     items_to_restore.append(existing)
-                # If attempts >= max_retries, do not auto-retry
+                # If attempts >= max_retries or error is non-retryable, do not auto-retry
 
     # Check for removed items
     for ext_id, existing in existing_items.items():

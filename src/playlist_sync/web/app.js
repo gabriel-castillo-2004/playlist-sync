@@ -172,8 +172,12 @@
         state.activeSourceId = data.source_id;
         const trackTitle = data.current_track || 'Canción actual';
         const percent = data.percentage || 0;
+        const bannerTitle =
+          data.item_index && data.total_to_download
+            ? `Descargando ${data.item_index} de ${data.total_to_download}: ${trackTitle}`
+            : `Descargando: ${trackTitle}`;
         updateSyncBanner(
-          `Descargando: ${trackTitle}`,
+          bannerTitle,
           `Progreso: ${percent}%`,
           percent
         );
@@ -192,10 +196,19 @@
       });
 
       es.addEventListener('sync_failed', (e) => {
+        let errMessage = 'Hubo un problema al sincronizar la lista.';
+        try {
+          const data = JSON.parse(e.data);
+          if (data && data.message) {
+            errMessage = data.message;
+          }
+        } catch (err) {
+          // Ignore malformed event data
+        }
         hideSyncBanner();
         state.isSyncing = false;
         state.activeSourceId = null;
-        showToast('Hubo un problema al sincronizar la lista.');
+        showToast(errMessage);
         loadSources(false);
       });
 
@@ -266,12 +279,18 @@
       card.className = 'source-card card';
       card.dataset.sourceId = source.id;
 
-      // Status badge logic
+      // Status badge logic (H-09: never show 'Al día ✓' when source.status === 'error')
       let badgeHtml = '';
+      let sourceErrorHtml = '';
       const isCardSyncing = state.isSyncing && state.activeSourceId === source.id;
 
       if (isCardSyncing) {
         badgeHtml = '<span class="badge badge-active">Descargando...</span>';
+      } else if (source.status === 'error') {
+        badgeHtml = '<span class="badge badge-error">Hubo un problema</span>';
+        if (source.last_error_message) {
+          sourceErrorHtml = `<div class="item-error-msg" style="margin-top: 0.25rem;">${escapeHtml(source.last_error_message)}</div>`;
+        }
       } else if (source.error_count > 0) {
         badgeHtml = `<span class="badge badge-warning">Problemas en ${source.error_count} ${source.error_count === 1 ? 'canción' : 'canciones'}</span>`;
       } else if (source.pending_count > 0) {
@@ -323,6 +342,7 @@
           <div class="source-info">
             <h2 class="source-title">${escapeHtml(source.title)}</h2>
             ${badgeHtml}
+            ${sourceErrorHtml}
             <div class="source-counts">${countsText}</div>
           </div>
         </div>

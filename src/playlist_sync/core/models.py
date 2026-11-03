@@ -75,6 +75,8 @@ class Progress:
     speed_bytes_per_sec: float | None = None
     eta_seconds: int | None = None
     current_item_title: str | None = None
+    item_index: int | None = None
+    total_to_download: int | None = None
 
 
 @dataclass

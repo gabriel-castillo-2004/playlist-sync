@@ -295,3 +295,81 @@ def test_calculate_sync_plan_missing_disk_file_redownloads() -> None:
     )
     assert len(plan.items_to_download) == 1
     assert plan.items_to_download[0].external_id == "vid1"
+
+
+def test_calculate_sync_plan_skips_non_retryable_errors_and_backoff_h12() -> None:
+    """H-12: Non-retryable errors (AGE_RESTRICTED, GEO_BLOCKED) are not auto-retried; transient errors use growing backoff."""
+    from playlist_sync.core.sync_rules import calculate_retry_backoff_seconds
+
+    remotes = [
+        RemoteItem(external_id="age_vid", title="Age Restricted", position=1, url="http://v1"),
+        RemoteItem(external_id="geo_vid", title="Geo Blocked", position=2, url="http://v2"),
+        RemoteItem(external_id="net_vid", title="Network Transient", position=3, url="http://v3"),
+        RemoteItem(external_id="rate_vid", title="Rate Limited", position=4, url="http://v4"),
+    ]
+    existing = {
+        "age_vid": ItemRecord(
+            id=1,
+            source_id=1,
+            external_id="age_vid",
+            title="Age Restricted",
+            position=1,
+            published_at=None,
+            status=ItemStatus.ERROR,
+            error_code=ErrorCode.AGE_RESTRICTED,
+            error_message="Restricción de edad",
+            attempts=1,
+            file_path=None,
+            downloaded_at=None,
+        ),
+        "geo_vid": ItemRecord(
+            id=2,
+            source_id=1,
+            external_id="geo_vid",
+            title="Geo Blocked",
+            position=2,
+            published_at=None,
+            status=ItemStatus.ERROR,
+            error_code=ErrorCode.GEO_BLOCKED,
+            error_message="Bloqueado en tu país",
+            attempts=1,
+            file_path=None,
+            downloaded_at=None,
+        ),
+        "net_vid": ItemRecord(
+            id=3,
+            source_id=1,
+            external_id="net_vid",
+            title="Network Transient",
+            position=3,
+            published_at=None,
+            status=ItemStatus.ERROR,
+            error_code=ErrorCode.NETWORK,
+            error_message="Sin red",
+            attempts=1,
+            file_path=None,
+            downloaded_at=None,
+        ),
+        "rate_vid": ItemRecord(
+            id=4,
+            source_id=1,
+            external_id="rate_vid",
+            title="Rate Limited",
+            position=4,
+            published_at=None,
+            status=ItemStatus.ERROR,
+            error_code=ErrorCode.RATE_LIMITED,
+            error_message="Espera un poco",
+            attempts=2,
+            file_path=None,
+            downloaded_at=None,
+        ),
+    }
+    plan = calculate_sync_plan(existing_items=existing, remote_items=remotes, max_retries=3)
+    scheduled_ids = [it.external_id for it in plan.items_to_download]
+    assert scheduled_ids == ["net_vid", "rate_vid"]
+
+    b1 = calculate_retry_backoff_seconds(1, base_seconds=1.0)
+    b2 = calculate_retry_backoff_seconds(2, base_seconds=1.0)
+    b3 = calculate_retry_backoff_seconds(3, base_seconds=1.0)
+    assert 0 < b1 < b2 < b3

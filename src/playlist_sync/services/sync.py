@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import re
 import shutil
+import time
 from collections.abc import Callable
 from pathlib import Path
 
@@ -21,7 +22,11 @@ from playlist_sync.core.models import (
     SourceStatus,
     SyncResult,
 )
-from playlist_sync.core.sync_rules import calculate_sync_plan, evaluate_remote_safety
+from playlist_sync.core.sync_rules import (
+    calculate_retry_backoff_seconds,
+    calculate_sync_plan,
+    evaluate_remote_safety,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -48,19 +53,46 @@ def add_source_service(
     source_adapter: Source,
     url: str,
 ) -> SourceRecord:
-    """Inspect and add a new source to the database."""
+    """Inspect and add a new source to the database, populating initial pending items (RF-2, H-09)."""
     # Check if already registered
     existing = repo.get_source_by_url(url)
     if existing:
         return existing
 
     info = source_adapter.inspect(url)
-    return repo.add_source(
+    source = repo.add_source(
         kind=info.kind,
         url=info.url,
         title=info.title,
         cover_url=info.cover_url,
     )
+
+    try:
+        initial_items = source_adapter.list_items(source)
+    except Exception as exc:
+        logger.warning("Could not fetch initial item list while adding source %s: %s", url, exc)
+        initial_items = []
+
+    for remote_item in initial_items:
+        repo.upsert_item(
+            source_id=source.id,
+            external_id=remote_item.external_id,
+            title=remote_item.title,
+            position=remote_item.position,
+            published_at=remote_item.published_at,
+            artist=remote_item.artist,
+        )
+
+    known_count = len(initial_items) if initial_items else (info.item_count or 0)
+    if known_count > 0:
+        source = repo.update_source_metadata(
+            source_id=source.id,
+            title=source.title,
+            cover_url=source.cover_url,
+            last_known_count=known_count,
+        )
+
+    return source
 
 
 def sync_source_service(
@@ -73,6 +105,8 @@ def sync_source_service(
     min_free_mb: int = 1024,
     safety_threshold: float = 0.50,
     max_retries: int = 3,
+    retry_backoff_base: float = 1.0,
+    sleep_fn: Callable[[float], None] = time.sleep,
 ) -> SyncResult:
     """Perform incremental synchronization of a source."""
     source = repo.get_source(source_id)
@@ -159,7 +193,21 @@ def sync_source_service(
     failed_items: list[tuple[str, str]] = []
 
     # 3. Download items sequentially (RNF-4)
-    for remote_item in plan.items_to_download:
+    total_to_download = len(plan.items_to_download)
+    for item_idx, remote_item in enumerate(plan.items_to_download, start=1):
+        prior_item = existing_items.get(remote_item.external_id)
+        if (
+            prior_item is not None
+            and prior_item.status == ItemStatus.ERROR
+            and prior_item.attempts > 0
+            and prior_item.error_code in (ErrorCode.RATE_LIMITED, ErrorCode.NETWORK)
+        ):
+            wait_sec = calculate_retry_backoff_seconds(
+                prior_item.attempts, base_seconds=retry_backoff_base
+            )
+            if wait_sec > 0:
+                sleep_fn(wait_sec)
+
         db_item = repo.upsert_item(
             source_id=source_id,
             external_id=remote_item.external_id,
@@ -170,11 +218,26 @@ def sync_source_service(
         )
         repo.update_item_status(db_item.id, ItemStatus.DOWNLOADING)
 
+        item_progress_cb: Callable[[Progress], None] | None = None
+        if on_progress is not None:
+
+            def _make_item_cb(
+                idx: int, total_dl: int, cb: Callable[[Progress], None]
+            ) -> Callable[[Progress], None]:
+                def _wrapped(p: Progress) -> None:
+                    p.item_index = idx
+                    p.total_to_download = total_dl
+                    cb(p)
+
+                return _wrapped
+
+            item_progress_cb = _make_item_cb(item_idx, total_to_download, on_progress)
+
         try:
             downloaded = source_adapter.download(
                 item=remote_item,
                 dest_dir=dest_dir,
-                on_progress=on_progress,
+                on_progress=item_progress_cb,
             )
             final_path = lib.finalize_item(
                 source=source,

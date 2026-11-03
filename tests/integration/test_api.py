@@ -350,3 +350,230 @@ def test_reconcile_endpoints_rf20(tmp_path: Path) -> None:
     detail = client.get(f"/sources/{source_id}").json()
     assert detail["downloaded_count"] == 2
     assert detail["pending_count"] == 0
+
+
+def test_concurrent_trigger_sync_toctou_h11(tmp_path: Path) -> None:
+    """H-11: Two simultaneous trigger_sync calls must not both succeed; one succeeds (200) and one raises AppError (409)."""
+    from playlist_sync.core.errors import AppError
+
+    db_file = tmp_path / "toctou.sqlite3"
+    music_root = tmp_path / "music"
+    repo = SQLiteRepo(db_file)
+    items = [RemoteItem(external_id="v1", title="Song 1", position=1, url="http://v1")]
+    fake = FakeSource(title="TOCTOU Playlist", items=items)
+
+    app = create_app(
+        repo=repo,
+        source_adapter=fake,
+        music_root=music_root,
+        log_file=str(tmp_path / "toctou.log"),
+    )
+    app.state.doctor = make_mock_doctor()
+    client = TestClient(app)
+
+    resp_add = client.post("/sources", json={"url": "https://youtube.com/playlist?list=PLtoctou"})
+    source_id = resp_add.json()["id"]
+    executor = app.state.job_executor
+
+    async def fire_two_simultaneous() -> list[object]:
+        results = await asyncio.gather(
+            executor.trigger_sync(source_id),
+            executor.trigger_sync(source_id),
+            return_exceptions=True,
+        )
+        await executor.wait_idle(timeout=5.0)
+        return list(results)
+
+    outcomes = asyncio.run(fire_two_simultaneous())
+    successes = [r for r in outcomes if r is True]
+    conflicts = [r for r in outcomes if isinstance(r, AppError)]
+    assert len(successes) == 1
+    assert len(conflicts) == 1
+
+
+def test_retry_item_lock_guard_resets_attempts_and_200_ok_h12(tmp_path: Path) -> None:
+    """H-12: retry_item checks lock before mutating DB, resets attempts to 0, and succeeds with 200 OK."""
+    from playlist_sync.core.models import ItemStatus
+
+    db_file = tmp_path / "retry_h12.sqlite3"
+    music_root = tmp_path / "music"
+    repo = SQLiteRepo(db_file)
+    items = [RemoteItem(external_id="v_err", title="Retry Track", position=1, url="http://verr")]
+    fake = FakeSource(title="Retry H12 Playlist", items=items)
+
+    app = create_app(
+        repo=repo,
+        source_adapter=fake,
+        music_root=music_root,
+        log_file=str(tmp_path / "retry_h12.log"),
+    )
+    app.state.doctor = make_mock_doctor()
+    client = TestClient(app)
+
+    client.post("/sources", json={"url": "https://youtube.com/playlist?list=PLretryh12"})
+    item = repo.upsert_item(source_id=1, external_id="v_err", title="Retry Track", position=1)
+    for _ in range(3):
+        repo.update_item_status(
+            item.id,
+            status=ItemStatus.ERROR,
+            error_code="NETWORK",
+            error_message="Sin conexión",
+            increment_attempts=True,
+        )
+
+    item_before = repo.get_item(item.id)
+    assert item_before is not None
+    assert item_before.attempts == 3
+    assert item_before.status == ItemStatus.ERROR
+
+    # 1. While lock is held, /retry returns 409 AND must NOT have cleared status/error in DB
+    asyncio.run(app.state.job_executor._lock.acquire())
+    resp_locked = client.post(f"/items/{item.id}/retry")
+    assert resp_locked.status_code == 409
+
+    item_still_error = repo.get_item(item.id)
+    assert item_still_error is not None
+    assert item_still_error.status == ItemStatus.ERROR
+    assert item_still_error.error_code == "NETWORK"
+    assert item_still_error.attempts == 3
+    app.state.job_executor._lock.release()
+
+    # 2. When lock is free, /retry returns 200 OK, resets attempts to 0, and downloads the track
+    resp_ok = client.post(f"/items/{item.id}/retry")
+    assert resp_ok.status_code == 200
+    assert resp_ok.json()["success"] is True
+
+    asyncio.run(app.state.job_executor.wait_idle(timeout=5.0))
+    item_after = repo.get_item(item.id)
+    assert item_after is not None
+    assert item_after.status == ItemStatus.DOWNLOADED
+    assert item_after.attempts == 1
+
+
+def test_add_source_populates_pending_items_and_ui_renders_source_error_h09(
+    tmp_path: Path,
+) -> None:
+    """H-09: POST /sources populates initial items as pending (with count) and app.js renders source-level error."""
+    db_file = tmp_path / "h09.sqlite3"
+    music_root = tmp_path / "music"
+    repo = SQLiteRepo(db_file)
+    items = [
+        RemoteItem(external_id="v1_h09", title="Track 1", position=1, url="http://v1"),
+        RemoteItem(external_id="v2_h09", title="Track 2", position=2, url="http://v2"),
+    ]
+    fake = FakeSource(title="H09 Playlist", items=items)
+
+    app = create_app(
+        repo=repo,
+        source_adapter=fake,
+        music_root=music_root,
+        log_file=str(tmp_path / "h09.log"),
+    )
+    app.state.doctor = make_mock_doctor()
+    client = TestClient(app)
+
+    resp = client.post("/sources", json={"url": "https://youtube.com/playlist?list=PLh09"})
+    assert resp.status_code == 201
+    data = resp.json()
+    assert data["pending_count"] == 2
+    assert data["last_known_count"] == 2
+    assert data["downloaded_count"] == 0
+
+    detail = client.get(f"/sources/{data['id']}").json()
+    assert len(detail["items"]) == 2
+    assert all(it["status"] == "pending" for it in detail["items"])
+
+    # Verify app.js handles source.status === 'error' with "Hubo un problema" and last_error_message
+    app_js = client.get("/app.js").text
+    assert "source.status === 'error'" in app_js
+    assert "Hubo un problema" in app_js
+    assert "source.last_error_message" in app_js
+
+
+def test_progress_includes_item_index_total_and_sync_all_emits_app_error_h16(
+    tmp_path: Path,
+) -> None:
+    """H-16: Progress includes item_index/total_to_download, UI shows 'Descargando X de Y', and _run_sync_all_task emits AppError.code/user_message."""
+    import json
+
+    from playlist_sync.core.models import Progress, SourceKind
+
+    db_file = tmp_path / "h16.sqlite3"
+    music_root = tmp_path / "music"
+    repo = SQLiteRepo(db_file)
+    five_items = [
+        RemoteItem(external_id=f"v{i}_h16", title=f"Track {i}", position=i, url=f"http://v{i}")
+        for i in range(1, 6)
+    ]
+    fake = FakeSource(title="H16 Playlist", items=five_items)
+    broadcaster = SSEBroadcaster()
+
+    app = create_app(
+        repo=repo,
+        source_adapter=fake,
+        music_root=music_root,
+        broadcaster=broadcaster,
+        log_file=str(tmp_path / "h16.log"),
+    )
+    app.state.doctor = make_mock_doctor()
+    client = TestClient(app)
+
+    # 1. Verify Progress model has item_index and total_to_download
+    p = Progress(status="downloading", item_index=2, total_to_download=5)
+    assert p.item_index == 2
+    assert p.total_to_download == 5
+
+    # 2. Verify sync_all emits item_index / total_to_download during download and err.code / err.user_message on AppError
+    src = repo.add_source(
+        kind=SourceKind.YT_PLAYLIST,
+        url="https://youtube.com/playlist?list=PLh16",
+        title="H16 Private Source",
+    )
+    observed_indices: list[tuple[int | None, int | None]] = []
+    from playlist_sync.services.sync import sync_source_service
+
+    sync_source_service(
+        repo=repo,
+        source_adapter=fake,
+        source_id=src.id,
+        music_root=music_root,
+        on_progress=lambda prog: observed_indices.append((prog.item_index, prog.total_to_download)),
+        min_free_mb=1,
+    )
+    assert (2, 5) in observed_indices
+    assert (5, 5) in observed_indices
+
+    fake.is_private = True
+
+    async def run_sync_all_and_collect() -> list[str]:
+        gen = broadcaster.subscribe()
+        # Consume initial ping
+        await asyncio.wait_for(anext(gen), timeout=3.0)
+        await app.state.job_executor.trigger_sync_all()
+        await app.state.job_executor.wait_idle(timeout=5.0)
+
+        events: list[str] = []
+        while True:
+            try:
+                ev = await asyncio.wait_for(anext(gen), timeout=0.2)
+                events.append(ev)
+            except TimeoutError:
+                break
+        await gen.aclose()
+        return events
+
+    emitted = asyncio.run(run_sync_all_and_collect())
+    failed_events = [e for e in emitted if "event: sync_failed" in e]
+    assert len(failed_events) == 1
+    data_line = [line for line in failed_events[0].splitlines() if line.startswith("data: ")][0]
+    payload = json.loads(data_line.removeprefix("data: "))
+    assert payload["source_id"] == src.id
+    assert payload["error_code"] == "PRIVATE_SOURCE"
+    assert "privada" in payload["message"]
+    assert "Fake private playlist" not in payload["message"]
+
+    # 3. Verify app.js formats 'Descargando ${data.item_index} de ${data.total_to_download}'
+    app_js = client.get("/app.js").text
+    assert "item_index" in app_js
+    assert "total_to_download" in app_js
+    assert "Descargando ${data.item_index} de ${data.total_to_download}" in app_js

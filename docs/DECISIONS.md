@@ -193,6 +193,19 @@ Este documento registra las decisiones técnicas tomadas a lo largo del proyecto
 - **Motivo:** Garantizar la operación desatendida en Linux Mint 22.3, la prevención de bloqueos por límite de tasa en YouTube, la reconciliación sin redescargas frente a bibliotecas locales existentes y la instalación limpia en Windows 11.
 - **Alternativas descartadas:** Mantener la actualización de `yt-dlp` únicamente en scripts shell externos sin registro en `playlist_sync.log` o requerir redescarga de pistas ya presentes en `music_root`.
 
+---
+
+## ADR-017: Etapa R5 — Candado exclusivo libre de TOCTOU, reintentos con filtro `retryable` y backoff exponencial, conteo inicial de pendientes/estado de error en UI y progreso de elementos (`item_index`/`total_to_download`) (H-11, H-12, H-09, H-16)
+- **Fecha:** 2026-11-02
+- **Decisión:**
+  - **H-11:** En `JobExecutor.trigger_sync` y `JobExecutor.trigger_sync_all` (`src/playlist_sync/services/jobs.py`), adquirir explícitamente `await self._lock.acquire()` *antes* de invocar `asyncio.create_task(...)` y liberar el candado en el bloque `finally:` de `_run_sync_task` y `_run_sync_all_task`. Esto elimina la ventana TOCTOU entre la verificación de `self._lock.locked()` y el inicio efectivo de la corrutina en segundo plano.
+  - **H-12:** En `JobExecutor.retry_item`, verificar `self._lock.locked()` antes de mutar el estado del ítem en SQLite y pasar `reset_attempts=True` a `repo.update_item_status` para restablecer `attempts = 0`. En `src/playlist_sync/core/sync_rules.py`, definir `NON_RETRYABLE_ERROR_CODES` (`PRIVATE_SOURCE`, `SOURCE_DELETED`, `AGE_RESTRICTED`, `GEO_BLOCKED`, `INVALID_URL`, `SAFETY_THRESHOLD_EXCEEDED`, `DISK_FULL`) e `is_error_retryable` para no reintentar errores permanentes en `calculate_sync_plan`, e implementar `calculate_retry_backoff_seconds` para aplicar espera creciente en `sync_source_service` ante fallos transitorios previos (`RATE_LIMITED`, `NETWORK`).
+  - **H-09:** En `add_source_service` (`src/playlist_sync/services/sync.py`), consultar inicialmente `source_adapter.list_items(source)` al registrar una fuente para poblar los elementos como `pending` y actualizar `last_known_count` en SQLite, de modo que la tarjeta muestre de inmediato las canciones pendientes en lugar de aparentar 0 pendientes. En `src/playlist_sync/web/app.js`, verificar explícitamente `else if (source.status === 'error')` antes de evaluar `pending_count > 0`, mostrando la insignia `.badge-error` (`"Hubo un problema"`) y el mensaje `source.last_error_message` en la tarjeta en vez de `"Al día ✓"`.
+  - **H-16:** Añadir `item_index: int | None = None` y `total_to_download: int | None = None` al modelo `Progress` (`src/playlist_sync/core/models.py`), inyectarlos durante el bucle de descarga en `sync_source_service`, emitirlos en `_sync_progress_callback` y mostrarlos en el banner de progreso de `app.js` con el formato `"Descargando X de Y: <título>"`. En `JobExecutor._run_sync_all_task`, capturar `AppError` antes de `Exception` para emitir `err.code` y `err.user_message` en el evento SSE `sync_failed`, sin filtrar detalles técnicos crudos (`str(exc)`).
+- **Motivo:** Erradicar condiciones de carrera al disparar sincronizaciones simultáneas, respetar la semántica de reintentabilidad y backoff frente a bloqueos temporales, y ofrecer retroalimentación veraz y comprensible en la interfaz web.
+- **Alternativas descartadas:** Adquirir el candado dentro de la tarea creada por `asyncio.create_task` (vulnerable a TOCTOU) o reintentar indefinidamente errores permanentes como `AGE_RESTRICTED` y `GEO_BLOCKED`.
+
+
 
 
 

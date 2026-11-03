@@ -112,6 +112,8 @@ class JobExecutor:
                 "percentage": round(p.percentage, 1),
                 "speed_bytes_sec": p.speed_bytes_per_sec,
                 "current_track": p.current_item_title,
+                "item_index": p.item_index,
+                "total_to_download": p.total_to_download,
             }
             asyncio.run_coroutine_threadsafe(
                 self.broadcaster.emit("progress", data),
@@ -128,9 +130,13 @@ class JobExecutor:
                 retryable=True,
             )
 
+        await self._lock.acquire()
         self._loop = asyncio.get_running_loop()
-        # Fire background task
-        self._current_task = asyncio.create_task(self._run_sync_task(source_id))
+        try:
+            self._current_task = asyncio.create_task(self._run_sync_task(source_id))
+        except Exception:
+            self._lock.release()
+            raise
         return True
 
     async def trigger_sync_all(self) -> bool:
@@ -143,12 +149,17 @@ class JobExecutor:
                 retryable=True,
             )
 
+        await self._lock.acquire()
         self._loop = asyncio.get_running_loop()
-        self._current_task = asyncio.create_task(self._run_sync_all_task())
+        try:
+            self._current_task = asyncio.create_task(self._run_sync_all_task())
+        except Exception:
+            self._lock.release()
+            raise
         return True
 
     async def retry_item(self, item_id: int) -> bool:
-        """Reset attempts on an error item and trigger a sync of its source."""
+        """Reset attempts on an error item and trigger a sync of its source (H-12)."""
         item = self.repo.get_item(item_id)
         if not item:
             raise AppError(
@@ -157,18 +168,27 @@ class JobExecutor:
                 technical_detail=f"Item {item_id} not found in database.",
             )
 
-        # Reset item status to pending with 0 attempts
+        if self._lock.locked():
+            raise AppError(
+                code=ErrorCode.UNKNOWN,
+                user_message="Ya hay una sincronización en curso. Por favor espera a que termine.",
+                technical_detail="Conflict: JobExecutor lock is currently held.",
+                retryable=True,
+            )
+
+        # Reset item status to pending with 0 attempts only after verifying lock is free
         self.repo.update_item_status(
             item_id=item_id,
             status=ItemStatus.PENDING,
             error_code=None,
             error_message=None,
+            reset_attempts=True,
         )
         return await self.trigger_sync(item.source_id)
 
     async def _run_sync_task(self, source_id: int) -> None:
         """Internal execution of single source sync within the exclusive lock."""
-        async with self._lock:
+        try:
             self._current_source_id = source_id
             await self.broadcaster.emit("sync_started", {"source_id": source_id})
             try:
@@ -214,12 +234,14 @@ class JobExecutor:
                         "message": "Ocurrió un problema inesperado durante la sincronización.",
                     },
                 )
-            finally:
-                self._current_source_id = None
+        finally:
+            self._current_source_id = None
+            if self._lock.locked():
+                self._lock.release()
 
     async def _run_sync_all_task(self) -> None:
         """Internal execution of sequential sync for all sources within the lock."""
-        async with self._lock:
+        try:
             sources = self.repo.list_sources()
             await self.broadcaster.emit("sync_all_started", {"total_sources": len(sources)})
             for src in sources:
@@ -252,16 +274,30 @@ class JobExecutor:
                             "failed": res.failed_count,
                         },
                     )
+                except AppError as err:
+                    logger.warning("Sync error during sync-all for source %s: %s", src.id, err)
+                    await self.broadcaster.emit(
+                        "sync_failed",
+                        {
+                            "source_id": src.id,
+                            "error_code": err.code,
+                            "message": err.user_message,
+                        },
+                    )
                 except Exception as exc:
-                    logger.warning("Error during sync-all for source %s: %s", src.id, exc)
+                    logger.warning(
+                        "Unexpected error during sync-all for source %s: %s", src.id, exc
+                    )
                     await self.broadcaster.emit(
                         "sync_failed",
                         {
                             "source_id": src.id,
                             "error_code": ErrorCode.UNKNOWN,
-                            "message": str(exc),
+                            "message": "Ocurrió un problema inesperado durante la sincronización.",
                         },
                     )
-
-            self._current_source_id = None
             await self.broadcaster.emit("sync_all_completed", {})
+        finally:
+            self._current_source_id = None
+            if self._lock.locked():
+                self._lock.release()
